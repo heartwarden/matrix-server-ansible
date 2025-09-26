@@ -96,6 +96,14 @@
     state: disabled
   when: not ufw_enabled
 
+- name: Create iptables configuration directory
+  file:
+    path: /etc/iptables
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+
 - name: Configure iptables for additional security
   template:
     src: iptables-security.j2
@@ -114,6 +122,15 @@
     mode: '0644'
   notify: reload ufw
 
+- name: Create fail2ban action directory
+  file:
+    path: /etc/fail2ban/action.d
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+  when: fail2ban_enabled | default(true)
+
 - name: Configure fail2ban UFW integration
   template:
     src: fail2ban-ufw.conf.j2
@@ -122,6 +139,7 @@
     group: root
     mode: '0644'
   notify: restart fail2ban
+  when: fail2ban_enabled | default(true)
 
 - name: Ensure UFW is enabled at boot
   systemd:

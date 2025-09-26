@@ -7,212 +7,241 @@ set -euo pipefail
 # Configuration
 SERVER_NAME="{{ inventory_hostname }}"
 REPORT_EMAIL="{{ monitoring_email | default('root@localhost') }}"
-REPORT_FILE="/tmp/monitoring-report-$(date +%Y%m%d).txt"
+REPORT_FILE="/tmp/monitoring-report-\$(date +%Y%m%d).txt"
 
 generate_report() {
-    cat > "$REPORT_FILE" << 'REPORT_EOF'
+    # Write report header
+    cat > "\$REPORT_FILE" << 'HEADER_END'
 Matrix Server Daily Monitoring Report
 =====================================
 
-Server: $SERVER_NAME
-Date: $(date '+%Y-%m-%d')
-Report Generated: $(date '+%Y-%m-%d %H:%M:%S')
+HEADER_END
 
+    echo "Server: \$SERVER_NAME" >> "\$REPORT_FILE"
+    echo "Date: \$(date '+%Y-%m-%d')" >> "\$REPORT_FILE"
+    echo "Report Generated: \$(date '+%Y-%m-%d %H:%M:%S')" >> "\$REPORT_FILE"
+    echo "" >> "\$REPORT_FILE"
+
+    # System Overview
+    cat >> "\$REPORT_FILE" << 'SYSTEM_END'
 SYSTEM OVERVIEW
 ===============
 
-Uptime: $(uptime -p)
-Load Average: $(uptime | awk -F'load average:' '{print $2}')
+SYSTEM_END
 
-System Resources:
-$(free -h | grep -E "Mem|Swap")
+    echo "Uptime: \$(uptime -p)" >> "\$REPORT_FILE"
+    echo "Load Average:\$(uptime | awk -F'load average:' '{print \$2}')" >> "\$REPORT_FILE"
+    echo "" >> "\$REPORT_FILE"
+    echo "System Resources:" >> "\$REPORT_FILE"
+    free -h | grep -E "Mem|Swap" >> "\$REPORT_FILE"
+    echo "" >> "\$REPORT_FILE"
+    echo "Disk Usage:" >> "\$REPORT_FILE"
+    df -h | grep -E "^/dev" >> "\$REPORT_FILE"
+    echo "" >> "\$REPORT_FILE"
 
-Disk Usage:
-$(df -h | grep -E "^/dev")
-
+    # Running Services
+    cat >> "\$REPORT_FILE" << 'SERVICES_END'
 RUNNING SERVICES
 ================
 
-Matrix Synapse: $(systemctl is-active matrix-synapse || echo "STOPPED")
-Caddy Web Server: $(systemctl is-active caddy || echo "STOPPED")
-PostgreSQL: $(systemctl is-active postgresql || echo "STOPPED")
-Redis: $(systemctl is-active redis-server || echo "STOPPED")
-REPORT_EOF
+SERVICES_END
 
+    echo "Matrix Synapse: \$(systemctl is-active matrix-synapse || echo \"STOPPED\")" >> "\$REPORT_FILE"
+    echo "Caddy Web Server: \$(systemctl is-active caddy || echo \"STOPPED\")" >> "\$REPORT_FILE"
+    echo "PostgreSQL: \$(systemctl is-active postgresql || echo \"STOPPED\")" >> "\$REPORT_FILE"
+    echo "Redis: \$(systemctl is-active redis-server || echo \"STOPPED\")" >> "\$REPORT_FILE"
 {% if fail2ban_enabled | default(true) %}
-    echo "Fail2ban: \$(systemctl is-active fail2ban || echo \"STOPPED\")" >> "$REPORT_FILE"
+    echo "Fail2ban: \$(systemctl is-active fail2ban || echo \"STOPPED\")" >> "\$REPORT_FILE"
 {% endif %}
+    echo "SSH: \$(systemctl is-active ssh || echo \"STOPPED\")" >> "\$REPORT_FILE"
+    echo "" >> "\$REPORT_FILE"
 
-    cat >> "$REPORT_FILE" << 'REPORT_EOF2'
-SSH: $(systemctl is-active ssh || echo "STOPPED")
-
+    # Matrix Server Status
+    cat >> "\$REPORT_FILE" << 'MATRIX_END'
 MATRIX SERVER STATUS
 ====================
 
-REPORT_EOF2
+MATRIX_END
 
     # Matrix API check
     if command -v curl >/dev/null 2>&1; then
-        local matrix_response=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:8008/_matrix/federation/v1/version" 2>/dev/null || echo "000")
-        echo "Matrix API Status: HTTP $matrix_response" >> "$REPORT_FILE"
+        local matrix_response=\$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:8008/_matrix/federation/v1/version" 2>/dev/null || echo "000")
+        echo "Matrix API Status: HTTP \$matrix_response" >> "\$REPORT_FILE"
     fi
 
     # Database size
     if command -v sudo >/dev/null 2>&1; then
-        local db_size=$(sudo -u postgres psql -c "SELECT pg_size_pretty(pg_database_size('synapse'));" 2>/dev/null | sed -n '3p' | xargs || echo "unknown")
-        echo "Database Size: $db_size" >> "$REPORT_FILE"
+        local db_size=\$(sudo -u postgres psql -c "SELECT pg_size_pretty(pg_database_size('synapse'));" 2>/dev/null | sed -n '3p' | xargs || echo "unknown")
+        echo "Database Size: \$db_size" >> "\$REPORT_FILE"
     fi
 
     # Storage size
     if [ -d "/var/lib/matrix-synapse" ]; then
-        local storage_size=$(du -sh /var/lib/matrix-synapse 2>/dev/null | awk '{print $1}' || echo "unknown")
-        echo "Storage Size: $storage_size" >> "$REPORT_FILE"
+        local storage_size=\$(du -sh /var/lib/matrix-synapse 2>/dev/null | awk '{print \$1}' || echo "unknown")
+        echo "Storage Size: \$storage_size" >> "\$REPORT_FILE"
     fi
+    echo "" >> "\$REPORT_FILE"
 
-    cat >> "$REPORT_FILE" << 'EOF'
-
+    # Security Summary
+    cat >> "\$REPORT_FILE" << 'SECURITY_END'
 SECURITY SUMMARY
 ================
 
-Failed SSH Attempts Today: $(grep "Failed password" /var/log/auth.log 2>/dev/null | grep "$(date '+%b %d')" | wc -l)
-Failed SSH Attempts Yesterday: $(grep "Failed password" /var/log/auth.log 2>/dev/null | grep "$(date -d yesterday '+%b %d')" | wc -l)
+SECURITY_END
 
-EOF
+    echo "Failed SSH Attempts Today: \$(grep \"Failed password\" /var/log/auth.log 2>/dev/null | grep \"\$(date '+%b %d')\" | wc -l)" >> "\$REPORT_FILE"
+    echo "Failed SSH Attempts Yesterday: \$(grep \"Failed password\" /var/log/auth.log 2>/dev/null | grep \"\$(date -d yesterday '+%b %d')\" | wc -l)" >> "\$REPORT_FILE"
+    echo "" >> "\$REPORT_FILE"
 
     # Fail2ban status
     if command -v fail2ban-client >/dev/null 2>&1; then
-        local banned_ips=$(fail2ban-client status sshd 2>/dev/null | grep "Currently banned" | awk '{print $NF}' || echo "0")
-        echo "Currently Banned IPs: $banned_ips" >> "$REPORT_FILE"
+        local banned_ips=\$(fail2ban-client status sshd 2>/dev/null | grep "Currently banned" | awk '{print \$NF}' || echo "0")
+        echo "Currently Banned IPs: \$banned_ips" >> "\$REPORT_FILE"
     fi
 
     # UFW status
     if command -v ufw >/dev/null 2>&1; then
-        echo "Firewall Status: $(ufw status | head -1)" >> "$REPORT_FILE"
+        echo "Firewall Status: \$(ufw status | head -1)" >> "\$REPORT_FILE"
     fi
+    echo "" >> "\$REPORT_FILE"
 
-    cat >> "$REPORT_FILE" << 'EOF'
-
+    # Network Status
+    cat >> "\$REPORT_FILE" << 'NETWORK_END'
 NETWORK STATUS
 ==============
 
-External Connectivity: $(ping -c 1 8.8.8.8 >/dev/null 2>&1 && echo "OK" || echo "FAILED")
-DNS Resolution: $(nslookup google.com >/dev/null 2>&1 && echo "OK" || echo "FAILED")
-Active Connections: $(netstat -an 2>/dev/null | grep ESTABLISHED | wc -l)
+NETWORK_END
 
+    echo "External Connectivity: \$(ping -c 1 8.8.8.8 >/dev/null 2>&1 && echo \"OK\" || echo \"FAILED\")" >> "\$REPORT_FILE"
+    echo "DNS Resolution: \$(nslookup google.com >/dev/null 2>&1 && echo \"OK\" || echo \"FAILED\")" >> "\$REPORT_FILE"
+    echo "Active Connections: \$(netstat -an 2>/dev/null | grep ESTABLISHED | wc -l)" >> "\$REPORT_FILE"
+    echo "" >> "\$REPORT_FILE"
+
+    # Recent Log Alerts
+    cat >> "\$REPORT_FILE" << 'LOGS_END'
 RECENT LOG ALERTS
 =================
 
 Recent Critical/Error Messages (last 24 hours):
-EOF
+LOGS_END
 
     # Add recent error messages
     local log_files=("/var/log/syslog" "/var/log/auth.log")
-    for log_file in "${log_files[@]}"; do
-        if [ -f "$log_file" ]; then
-            echo "" >> "$REPORT_FILE"
-            echo "From $log_file:" >> "$REPORT_FILE"
-            grep -E "(CRITICAL|ERROR|Failed)" "$log_file" 2>/dev/null | grep "$(date '+%b %d')" | tail -10 >> "$REPORT_FILE" || echo "No critical errors found" >> "$REPORT_FILE"
+    for log_file in "\${log_files[@]}"; do
+        if [ -f "\$log_file" ]; then
+            echo "" >> "\$REPORT_FILE"
+            echo "From \$log_file:" >> "\$REPORT_FILE"
+            grep -E "(CRITICAL|ERROR|Failed)" "\$log_file" 2>/dev/null | grep "\$(date '+%b %d')" | tail -10 >> "\$REPORT_FILE" || echo "No critical errors found" >> "\$REPORT_FILE"
         fi
     done
 
     # Matrix-specific errors
     if [ -f "/var/log/matrix-synapse/homeserver.log" ]; then
-        echo "" >> "$REPORT_FILE"
-        echo "Matrix Synapse Errors (today):" >> "$REPORT_FILE"
-        grep -E "(ERROR|CRITICAL)" /var/log/matrix-synapse/homeserver.log 2>/dev/null | grep "$(date '+%Y-%m-%d')" | tail -10 >> "$REPORT_FILE" || echo "No Matrix errors found" >> "$REPORT_FILE"
+        echo "" >> "\$REPORT_FILE"
+        echo "Matrix Synapse Errors (today):" >> "\$REPORT_FILE"
+        grep -E "(ERROR|CRITICAL)" /var/log/matrix-synapse/homeserver.log 2>/dev/null | grep "\$(date '+%Y-%m-%d')" | tail -10 >> "\$REPORT_FILE" || echo "No Matrix errors found" >> "\$REPORT_FILE"
     fi
+    echo "" >> "\$REPORT_FILE"
 
-    cat >> "$REPORT_FILE" << 'EOF'
-
+    # Disk Space Trends
+    cat >> "\$REPORT_FILE" << 'DISK_END'
 DISK SPACE TRENDS
 =================
 
 Current Disk Usage:
-$(df -h | head -1)
-$(df -h | grep -E "^/dev")
+DISK_END
 
-Large Files (>100MB):
-$(find /var/log -type f -size +100M 2>/dev/null | head -10 || echo "No large log files found")
+    df -h | head -1 >> "\$REPORT_FILE"
+    df -h | grep -E "^/dev" >> "\$REPORT_FILE"
+    echo "" >> "\$REPORT_FILE"
+    echo "Large Files (>100MB):" >> "\$REPORT_FILE"
+    find /var/log -type f -size +100M 2>/dev/null | head -10 >> "\$REPORT_FILE" || echo "No large log files found" >> "\$REPORT_FILE"
+    echo "" >> "\$REPORT_FILE"
 
+    # Performance Metrics
+    cat >> "\$REPORT_FILE" << 'PERF_END'
 PERFORMANCE METRICS
 ===================
 
-EOF
+PERF_END
 
     # Add performance data if available
     if command -v iostat >/dev/null 2>&1; then
-        echo "I/O Statistics:" >> "$REPORT_FILE"
-        iostat -x 1 1 2>/dev/null | tail -n +4 >> "$REPORT_FILE" || echo "I/O stats unavailable" >> "$REPORT_FILE"
+        echo "I/O Statistics:" >> "\$REPORT_FILE"
+        iostat -x 1 1 2>/dev/null | tail -n +4 >> "\$REPORT_FILE" || echo "I/O stats unavailable" >> "\$REPORT_FILE"
     fi
+    echo "" >> "\$REPORT_FILE"
 
-    cat >> "$REPORT_FILE" << 'EOF'
-
+    # Recommendations
+    cat >> "\$REPORT_FILE" << 'RECS_END'
 RECOMMENDATIONS
 ===============
 
-EOF
+RECS_END
 
     # Generate recommendations based on current state
     local recommendations=()
 
     # Disk space recommendations
-    local disk_usage=$(df / | awk 'NR==2 {print $(NF-1)}' | sed 's/%//')
-    if [ "$disk_usage" -gt 80 ]; then
-        recommendations+=("- URGENT: Disk usage at ${disk_usage}%. Consider cleaning up logs or expanding storage.")
+    local disk_usage=\$(df / | awk 'NR==2 {print \$(NF-1)}' | sed 's/%//')
+    if [ "\$disk_usage" -gt 80 ]; then
+        recommendations+=("- URGENT: Disk usage at \${disk_usage}%. Consider cleaning up logs or expanding storage.")
     fi
 
     # Memory recommendations
-    local mem_usage=$(free | awk 'NR==2{printf "%.1f", $3*100/$2}')
-    local mem_int=${mem_usage%.*}
-    if [ "$mem_int" -gt 85 ]; then
-        recommendations+=("- Consider monitoring memory usage. Current usage: ${mem_usage}%")
+    local mem_usage=\$(free | awk 'NR==2{printf "%.1f", \$3*100/\$2}')
+    local mem_int=\${mem_usage%.*}
+    if [ "\$mem_int" -gt 85 ]; then
+        recommendations+=("- Consider monitoring memory usage. Current usage: \${mem_usage}%")
     fi
 
     # Security recommendations
-    local failed_ssh=$(grep "Failed password" /var/log/auth.log 2>/dev/null | grep "$(date '+%b %d')" | wc -l)
-    if [ "$failed_ssh" -gt 20 ]; then
-        recommendations+=("- High number of failed SSH attempts ($failed_ssh). Review fail2ban configuration.")
+    local failed_ssh=\$(grep "Failed password" /var/log/auth.log 2>/dev/null | grep "\$(date '+%b %d')" | wc -l)
+    if [ "\$failed_ssh" -gt 20 ]; then
+        recommendations+=("- High number of failed SSH attempts (\$failed_ssh). Review fail2ban configuration.")
     fi
 
     # Log cleanup recommendations
-    local old_logs=$(find /var/log -name "*.log" -mtime +30 2>/dev/null | wc -l)
-    if [ "$old_logs" -gt 10 ]; then
-        recommendations+=("- $old_logs log files older than 30 days found. Consider automated cleanup.")
+    local old_logs=\$(find /var/log -name "*.log" -mtime +30 2>/dev/null | wc -l)
+    if [ "\$old_logs" -gt 10 ]; then
+        recommendations+=("- \$old_logs log files older than 30 days found. Consider automated cleanup.")
     fi
 
-    if [ ${#recommendations[@]} -eq 0 ]; then
-        echo "- No immediate recommendations. System appears healthy." >> "$REPORT_FILE"
+    if [ \${#recommendations[@]} -eq 0 ]; then
+        echo "- No immediate recommendations. System appears healthy." >> "\$REPORT_FILE"
     else
-        printf '%s\n' "${recommendations[@]}" >> "$REPORT_FILE"
+        printf '%s\n' "\${recommendations[@]}" >> "\$REPORT_FILE"
     fi
+    echo "" >> "\$REPORT_FILE"
 
-    cat >> "$REPORT_FILE" << 'EOF'
-
+    # Next Monitoring Cycle
+    cat >> "\$REPORT_FILE" << 'CYCLE_END'
 NEXT MONITORING CYCLE
 ====================
 
-Next report will be generated: $(date -d "+1 day" '+%Y-%m-%d %H:%M:%S')
+CYCLE_END
 
-For real-time monitoring, run: /usr/local/bin/monitoring-dashboard.sh
-For health check, run: /usr/local/bin/health-check.sh
-For detailed status, run: /usr/local/bin/monitoring-status.py
-
----
-Generated by Matrix Server Monitoring System
-EOF
+    echo "Next report will be generated: \$(date -d \"+1 day\" '+%Y-%m-%d %H:%M:%S')" >> "\$REPORT_FILE"
+    echo "" >> "\$REPORT_FILE"
+    echo "For real-time monitoring, run: /usr/local/bin/monitoring-dashboard.sh" >> "\$REPORT_FILE"
+    echo "For health check, run: /usr/local/bin/health-check.sh" >> "\$REPORT_FILE"
+    echo "For detailed status, run: /usr/local/bin/monitoring-status.py" >> "\$REPORT_FILE"
+    echo "" >> "\$REPORT_FILE"
+    echo "---" >> "\$REPORT_FILE"
+    echo "Generated by Matrix Server Monitoring System" >> "\$REPORT_FILE"
 }
 
 send_report() {
     if command -v mail >/dev/null 2>&1; then
-        mail -s "Daily Monitoring Report - $SERVER_NAME" "$REPORT_EMAIL" < "$REPORT_FILE"
-        echo "Report sent to $REPORT_EMAIL"
+        mail -s "Daily Monitoring Report - \$SERVER_NAME" "\$REPORT_EMAIL" < "\$REPORT_FILE"
+        echo "Report sent to \$REPORT_EMAIL"
     else
-        echo "Warning: mail command not available. Report saved to $REPORT_FILE"
+        echo "Warning: mail command not available. Report saved to \$REPORT_FILE"
     fi
 }
 
 main() {
-    echo "Generating daily monitoring report for $SERVER_NAME..."
+    echo "Generating daily monitoring report for \$SERVER_NAME..."
 
     generate_report
     send_report
@@ -223,4 +252,4 @@ main() {
     echo "Monitoring report generation complete."
 }
 
-main "$@"
+main "\$@"

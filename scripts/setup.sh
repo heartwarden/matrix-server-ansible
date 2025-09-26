@@ -18,7 +18,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 
 # Configuration
-ANSIBLE_VERSION="core>=2.12,<2.16"
+ANSIBLE_CORE_VERSION=">=2.12,<2.16"
 PYTHON_MIN_VERSION="3.8"
 
 log() {
@@ -179,8 +179,8 @@ install_ansible() {
     fi
 
     # Install Ansible
-    info "Installing Ansible $ANSIBLE_VERSION..."
-    pip install "ansible-core$ANSIBLE_VERSION"
+    info "Installing Ansible core $ANSIBLE_CORE_VERSION..."
+    pip install "ansible-core$ANSIBLE_CORE_VERSION"
     pip install ansible
 
     # Install additional Python packages

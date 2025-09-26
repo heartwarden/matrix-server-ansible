@@ -1,0 +1,65 @@
+# SSH server configuration - SAFE initial configuration
+# This allows both root and zerokaine access during deployment
+Port {{ ssh_port | default(2222) }}
+Protocol 2
+AddressFamily inet
+
+# Authentication - SAFE SETTINGS (allows root initially)
+LoginGraceTime 60
+PermitRootLogin yes
+StrictModes yes
+MaxAuthTries 6
+MaxSessions 4
+PubkeyAuthentication yes
+AuthorizedKeysFile .ssh/authorized_keys
+PasswordAuthentication yes
+PermitEmptyPasswords no
+ChallengeResponseAuthentication no
+GSSAPIAuthentication no
+HostbasedAuthentication no
+PermitUserEnvironment no
+UsePAM yes
+
+# Connection settings
+ClientAliveInterval 300
+ClientAliveCountMax 2
+TCPKeepAlive yes
+
+# Forwarding
+X11Forwarding no
+AllowTcpForwarding no
+AllowAgentForwarding no
+GatewayPorts no
+PermitTunnel no
+
+# Misc
+PrintMotd no
+PrintLastLog yes
+Compression no
+UsePrivilegeSeparation sandbox
+VersionAddendum none
+
+{% if ssh_banner_enabled %}
+# Banner
+Banner /etc/ssh/banner
+{% endif %}
+
+# Logging
+SyslogFacility AUTH
+LogLevel VERBOSE
+
+# Host keys
+HostKey /etc/ssh/ssh_host_rsa_key
+HostKey /etc/ssh/ssh_host_ecdsa_key
+HostKey /etc/ssh/ssh_host_ed25519_key
+
+# Ciphers and algorithms (only strong ones)
+Ciphers chacha20-poly1305@openssh.com,aes256-gcm@openssh.com,aes128-gcm@openssh.com,aes256-ctr,aes192-ctr,aes128-ctr
+MACs hmac-sha2-256-etm@openssh.com,hmac-sha2-512-etm@openssh.com,hmac-sha2-256,hmac-sha2-512
+KexAlgorithms curve25519-sha256@libssh.org,diffie-hellman-group16-sha512,diffie-hellman-group18-sha512,diffie-hellman-group14-sha256
+
+# Allow both root and admin user during setup
+AllowUsers root {{ admin_username }}
+
+# Subsystem
+Subsystem sftp /usr/lib/openssh/sftp-server -f AUTHPRIV -l INFO

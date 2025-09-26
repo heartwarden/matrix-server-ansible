@@ -552,9 +552,13 @@ Press OK to continue..." 20 80
     echo "   cd $CONFIG_DIR"
     echo "   ./${SERVER_NAME}-deploy.sh"
     echo
-    echo "4. Connect to server after deployment:"
+    echo "4. Verify SSH access after deployment:"
     echo "   ssh -p $SSH_PORT zerokaine@$SERVER_IP"
-    echo "   (Uses the same SSH key currently in /root/.ssh/authorized_keys)"
+    echo "   (Test this connection BEFORE the script completes SSH hardening)"
+    echo
+    echo "5. Complete SSH hardening (if needed):"
+    echo "   sudo ./scripts/verify-ssh-access.sh"
+    echo "   (Use this script to safely disable root login after verifying zerokaine access)"
 }
 
 cleanup() {

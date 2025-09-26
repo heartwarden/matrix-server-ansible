@@ -78,9 +78,9 @@
   when: ssh_banner_enabled
   notify: restart ssh
 
-- name: Configure SSH daemon
+- name: Configure SSH daemon (initial safe configuration)
   template:
-    src: sshd_config.j2
+    src: sshd_config_safe.j2
     dest: /etc/ssh/sshd_config
     owner: root
     group: root
@@ -88,23 +88,78 @@
     backup: yes
   notify: restart ssh
 
-- name: Disable root login
+- name: Flush handlers to restart SSH with new configuration
+  meta: flush_handlers
+
+- name: Wait for SSH to be available on new port
+  wait_for:
+    port: "{{ ssh_port }}"
+    host: "{{ ansible_default_ipv4.address }}"
+    delay: 5
+    timeout: 30
+  when: ssh_port != 22
+
+- name: Test SSH connection for admin user
+  local_action: "shell ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -p {{ ssh_port }} {{ admin_username }}@{{ ansible_host | default(inventory_hostname) }} 'echo SSH_CONNECTION_TEST_SUCCESS'"
+  register: ssh_test_result
+  ignore_errors: yes
+  when: ansible_connection != 'local'
+
+- name: Display SSH test results
+  debug:
+    msg: |
+      SSH Test Results:
+      - Return code: {{ ssh_test_result.rc | default('N/A - local connection') }}
+      - Output: {{ ssh_test_result.stdout | default('N/A - local connection') }}
+
+      {% if ssh_test_result.rc is defined and ssh_test_result.rc == 0 %}
+      ✅ SUCCESS: zerokaine user SSH access verified!
+      {% elif ansible_connection == 'local' %}
+      ℹ️  Local deployment - SSH test skipped
+      {% else %}
+      ❌ WARNING: SSH test failed - keeping root access enabled for safety
+      {% endif %}
+
+- name: Apply final SSH hardening (disable root login)
   lineinfile:
     path: /etc/ssh/sshd_config
     regexp: '^#?PermitRootLogin'
     line: 'PermitRootLogin no'
     state: present
-  when: disable_root_login
+  when:
+    - disable_root_login
+    - ansible_connection == 'local' or (ssh_test_result.rc is defined and ssh_test_result.rc == 0)
   notify: restart ssh
 
-- name: Disable password authentication
+- name: Apply final SSH hardening (disable password authentication)
   lineinfile:
     path: /etc/ssh/sshd_config
     regexp: '^#?PasswordAuthentication'
     line: 'PasswordAuthentication no'
     state: present
-  when: disable_password_auth
+  when:
+    - disable_password_auth
+    - ansible_connection == 'local' or (ssh_test_result.rc is defined and ssh_test_result.rc == 0)
   notify: restart ssh
+
+- name: Display security warning if SSH test failed
+  debug:
+    msg: |
+      ⚠️  SECURITY WARNING ⚠️
+
+      SSH test for user '{{ admin_username }}' failed!
+      Root login has NOT been disabled for safety.
+
+      Please manually verify SSH access before disabling root:
+      1. Test SSH connection: ssh -p {{ ssh_port }} {{ admin_username }}@{{ inventory_hostname }}
+      2. If successful, manually disable root login:
+         sudo sed -i 's/^#\?PermitRootLogin.*/PermitRootLogin no/' /etc/ssh/sshd_config
+         sudo systemctl restart ssh
+      3. Lock root account: sudo passwd -l root
+  when:
+    - ansible_connection != 'local'
+    - ssh_test_result.rc is defined
+    - ssh_test_result.rc != 0
 
 - name: Create bash configuration for admin user
   template:

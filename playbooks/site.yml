@@ -7,13 +7,12 @@
     - name: confirm_deployment
       prompt: "This will deploy a complete Matrix server setup. Continue? (yes/no)"
       private: no
-      when: deployment_confirmed is not defined
 
   pre_tasks:
     - name: Verify deployment confirmation
       fail:
         msg: "Deployment cancelled by user"
-      when: confirm_deployment != "yes" and deployment_confirmed is not defined
+      when: confirm_deployment != "yes"
 
     - name: Check required variables
       assert:
@@ -65,7 +64,7 @@
         enabled: yes
       loop:
         - matrix-synapse
-        - nginx
+        - caddy
         - postgresql
         - redis-server
       tags: ['verification']
@@ -105,7 +104,7 @@
 
           📁 Important Files:
           - Synapse config: /etc/matrix-synapse/homeserver.yaml
-          - Nginx config: /etc/nginx/sites-available/matrix
+          - Caddy config: /etc/caddy/Caddyfile
           - SSL certificates: /etc/letsencrypt/live/{{ matrix_domain }}/
           - Logs: /var/log/matrix-synapse/
 

@@ -384,6 +384,14 @@ EOF
     success "Encrypted vault created: $vault_file"
     success "Vault password saved to: $vault_pass_file"
 
+    # Create symlink to vault password in project root for ansible.cfg
+    local project_vault_pass="$PROJECT_DIR/.vault_pass"
+    if [ -f "$project_vault_pass" ]; then
+        rm -f "$project_vault_pass"
+    fi
+    ln -sf "$vault_pass_file" "$project_vault_pass"
+    info "Created vault password symlink: .vault_pass"
+
     # Also create a vault info file (non-encrypted) for reference
     cat > "$CONFIG_DIR/${SERVER_NAME}-vault-info.txt" << EOF
 # Vault Information for $SERVER_NAME
@@ -476,6 +484,11 @@ BANNER
     # Deploy
     log "Deploying Matrix server..."
     cd "$PROJECT_DIR"  # Ensure we're in the project directory
+
+    # Set environment variables for Ansible
+    export ANSIBLE_ROLES_PATH="$PROJECT_DIR/roles"
+    export ANSIBLE_CONFIG="$PROJECT_DIR/ansible.cfg"
+
     ansible-playbook "playbooks/site.yml" \
         -i "$INVENTORY" \
         --vault-password-file="$VAULT_PASS" \

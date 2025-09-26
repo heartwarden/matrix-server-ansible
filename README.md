@@ -6,43 +6,47 @@ Comprehensive Ansible automation for deploying secure Matrix (Synapse) servers o
 
 ### Prerequisites
 - **Server**: Debian 12 with root access and public IP
-- **Local Machine**: macOS/Linux with Python 3.8+
-- **Domain**: DNS configured for your Matrix domains
-- **Dependencies**: `git`, `python3`, `pip3`, `whiptail`
+- **Domain**: DNS configured for your Matrix domains (A records pointing to your server)
 
-### 1. Clone and Setup
+### One-Command Deployment
+
+On your Debian 12 server, run:
 
 ```bash
-# Clone the repository
-git clone https://github.com/yourusername/matrix-server-ansible.git
+git clone https://github.com/heartwarden/matrix-server-ansible.git
 cd matrix-server-ansible
-
-# Run the setup script
-./scripts/setup.sh
+sudo ./deploy.sh
 ```
 
-### 2. Configure Your Server
+This single script will:
+1. **Install dependencies** (Ansible, Python, required packages)
+2. **Run configuration wizard** (TUI for domain, email, security settings)
+3. **Generate all files** (passwords, SSH keys, deployment scripts)
+4. **Deploy Matrix server** with full security hardening
 
+### Manual Step-by-Step
+
+If you prefer manual control:
+
+#### 1. Install Dependencies
+```bash
+apt-get update
+apt-get install -y python3 python3-pip whiptail openssl git
+pip3 install --break-system-packages ansible-core==2.15.8
+```
+
+#### 2. Configure Your Server
 ```bash
 # Interactive TUI configuration
-./scripts/configure-server.sh
+chmod +x scripts/configure-server.sh
+scripts/configure-server.sh
 ```
 
-The TUI will guide you through:
-- Server identification and domain configuration
-- Security settings (SSH port, timezone)
-- SSL email for Let's Encrypt
-- SSH key generation/selection
-- Password generation
-
-### 3. Deploy
-
+#### 3. Deploy
 ```bash
-# Navigate to your server configuration
-cd server-configs
-
 # Run the generated deployment script
-./your-server-name-deploy.sh
+chmod +x server-configs/your-server-name-deploy.sh
+server-configs/your-server-name-deploy.sh
 ```
 
 ## 🔧 Features

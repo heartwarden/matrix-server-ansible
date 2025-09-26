@@ -80,20 +80,48 @@
     - ssh_public_key == ""
     - generated_public_key_content is defined
 
+- name: Check if root authorized_keys exists
+  stat:
+    path: /root/.ssh/authorized_keys
+  register: root_authorized_keys
+
+- name: Copy root authorized_keys to admin user if no key provided
+  copy:
+    src: /root/.ssh/authorized_keys
+    dest: "/home/{{ admin_username }}/.ssh/authorized_keys"
+    owner: "{{ admin_username }}"
+    group: "{{ admin_username }}"
+    mode: '0600'
+    remote_src: yes
+  when:
+    - ssh_public_key == ""
+    - generated_keypair is not defined
+    - root_authorized_keys.stat.exists
+
+- name: Create authorized_keys file
+  file:
+    path: "/home/{{ admin_username }}/.ssh/authorized_keys"
+    state: touch
+    owner: "{{ admin_username }}"
+    group: "{{ admin_username }}"
+    mode: '0600'
+
 - name: Set up authorized_keys with provided public key
-  authorized_key:
-    user: "{{ admin_username }}"
-    key: "{{ ssh_public_key }}"
-    state: present
-    exclusive: yes
+  copy:
+    content: "{{ ssh_public_key }}\n"
+    dest: "/home/{{ admin_username }}/.ssh/authorized_keys"
+    owner: "{{ admin_username }}"
+    group: "{{ admin_username }}"
+    mode: '0600'
   when: ssh_public_key != ""
 
 - name: Set up authorized_keys with generated public key
-  authorized_key:
-    user: "{{ admin_username }}"
-    key: "{{ generated_keypair.public_key }}"
-    state: present
-    exclusive: yes
+  copy:
+    content: "{{ generated_keypair.public_key }}\n"
+    dest: "/home/{{ admin_username }}/.ssh/authorized_keys"
+    owner: "{{ admin_username }}"
+    group: "{{ admin_username }}"
+    mode: '0600'
   when: ssh_public_key == "" and generated_keypair is defined
 
 - name: Configure sudo for admin user

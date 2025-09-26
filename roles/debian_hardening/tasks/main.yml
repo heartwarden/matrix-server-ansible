@@ -1,0 +1,217 @@
+---
+- name: Update package cache
+  apt:
+    update_cache: yes
+    cache_valid_time: 3600
+
+- name: Upgrade all packages
+  apt:
+    upgrade: dist
+    autoremove: yes
+    autoclean: yes
+
+- name: Install essential security packages
+  apt:
+    name:
+      - fail2ban
+      - ufw
+      - auditd
+      - rkhunter
+      - chkrootkit
+      - aide
+      - logwatch
+      - unattended-upgrades
+      - apt-listchanges
+      - needrestart
+      - lynis
+    state: present
+
+- name: Remove insecure packages
+  apt:
+    name: "{{ remove_packages }}"
+    state: absent
+    purge: yes
+
+- name: Configure SSH hardening
+  template:
+    src: sshd_config.j2
+    dest: /etc/ssh/sshd_config
+    backup: yes
+    owner: root
+    group: root
+    mode: '0644'
+  notify: restart ssh
+
+- name: Set SSH host key permissions
+  file:
+    path: "{{ item }}"
+    owner: root
+    group: root
+    mode: '0600'
+  with_fileglob:
+    - /etc/ssh/ssh_host_*_key
+
+- name: Set SSH public key permissions
+  file:
+    path: "{{ item }}"
+    owner: root
+    group: root
+    mode: '0644'
+  with_fileglob:
+    - /etc/ssh/ssh_host_*_key.pub
+
+- name: Configure kernel hardening parameters
+  sysctl:
+    name: "{{ item.key }}"
+    value: "{{ item.value }}"
+    state: present
+    reload: yes
+    sysctl_file: /etc/sysctl.d/99-security.conf
+  with_dict: "{{ kernel_hardening }}"
+
+- name: Set secure file permissions
+  file:
+    path: "{{ item.path }}"
+    mode: "{{ item.mode }}"
+  loop: "{{ secure_files }}"
+
+- name: Set secure directory permissions
+  file:
+    path: "{{ item.path }}"
+    mode: "{{ item.mode }}"
+    state: directory
+  loop: "{{ secure_directories }}"
+
+- name: Configure password aging
+  lineinfile:
+    path: /etc/login.defs
+    regexp: "{{ item.regexp }}"
+    line: "{{ item.line }}"
+  loop:
+    - { regexp: '^PASS_MAX_DAYS', line: 'PASS_MAX_DAYS {{ password_max_age }}' }
+    - { regexp: '^PASS_MIN_DAYS', line: 'PASS_MIN_DAYS {{ password_min_age }}' }
+    - { regexp: '^PASS_WARN_AGE', line: 'PASS_WARN_AGE {{ password_warn_age }}' }
+
+- name: Disable unused services
+  systemd:
+    name: "{{ item }}"
+    enabled: no
+    state: stopped
+  loop: "{{ disable_services }}"
+  ignore_errors: yes
+
+- name: Configure auditd
+  template:
+    src: audit.rules.j2
+    dest: /etc/audit/rules.d/audit.rules
+    owner: root
+    group: root
+    mode: '0640'
+  notify: restart auditd
+  when: auditd_enabled
+
+- name: Configure automatic security updates
+  template:
+    src: 50unattended-upgrades.j2
+    dest: /etc/apt/apt.conf.d/50unattended-upgrades
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: Enable unattended upgrades
+  template:
+    src: 20auto-upgrades.j2
+    dest: /etc/apt/apt.conf.d/20auto-upgrades
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: Configure AIDE (file integrity monitoring)
+  command: aideinit
+  args:
+    creates: /var/lib/aide/aide.db.new
+
+- name: Initialize AIDE database
+  command: "mv /var/lib/aide/aide.db.new /var/lib/aide/aide.db"
+  args:
+    creates: /var/lib/aide/aide.db
+
+- name: Create daily AIDE check cron job
+  cron:
+    name: "AIDE integrity check"
+    minute: "0"
+    hour: "5"
+    job: "/usr/bin/aide --check"
+    user: root
+
+- name: Set timezone
+  timezone:
+    name: "{{ timezone | default('UTC') }}"
+
+- name: Configure NTP
+  template:
+    src: timesyncd.conf.j2
+    dest: /etc/systemd/timesyncd.conf
+    owner: root
+    group: root
+    mode: '0644'
+  notify: restart systemd-timesyncd
+
+- name: Secure shared memory
+  mount:
+    path: /dev/shm
+    src: tmpfs
+    fstype: tmpfs
+    opts: defaults,noexec,nosuid,nodev
+    state: mounted
+
+- name: Create security-related directories
+  file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+  loop:
+    - /var/log/security
+    - /etc/security/limits.d
+
+- name: Configure security limits
+  template:
+    src: security-limits.conf.j2
+    dest: /etc/security/limits.d/99-security.conf
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: Configure pam_pwquality for strong passwords
+  lineinfile:
+    path: /etc/pam.d/common-password
+    regexp: 'pam_pwquality.so'
+    line: 'password requisite pam_pwquality.so retry=3 minlen=12 difok=3 ucredit=-1 lcredit=-1 dcredit=-1 ocredit=-1 maxrepeat=3 gecos check'
+
+- name: Disable core dumps
+  lineinfile:
+    path: /etc/security/limits.conf
+    line: "* hard core 0"
+
+- name: Configure kernel module blacklist
+  template:
+    src: blacklist-security.conf.j2
+    dest: /etc/modprobe.d/blacklist-security.conf
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: Enable fail2ban service
+  systemd:
+    name: fail2ban
+    enabled: yes
+    state: started
+
+- name: Enable auditd service
+  systemd:
+    name: auditd
+    enabled: yes
+    state: started
+  when: auditd_enabled

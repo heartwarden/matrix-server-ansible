@@ -1,0 +1,20 @@
+---
+- name: restart node_exporter
+  systemd:
+    name: node_exporter
+    state: restarted
+
+- name: restart rsyslog
+  systemd:
+    name: rsyslog
+    state: restarted
+
+- name: restart sysstat
+  systemd:
+    name: sysstat
+    state: restarted
+
+- name: reload rsyslog
+  systemd:
+    name: rsyslog
+    state: reloaded

@@ -1,0 +1,200 @@
+---
+- name: Remove default users if requested
+  user:
+    name: "{{ item }}"
+    state: absent
+    remove: yes
+  loop: "{{ default_users_to_remove }}"
+  when: remove_default_users
+  ignore_errors: yes
+
+- name: Create admin user
+  user:
+    name: "{{ admin_username }}"
+    groups: "{{ admin_user_groups }}"
+    shell: /bin/bash
+    create_home: yes
+    home: "/home/{{ admin_username }}"
+    state: present
+
+- name: Set home directory permissions
+  file:
+    path: "/home/{{ admin_username }}"
+    mode: "{{ home_directory_mode }}"
+    owner: "{{ admin_username }}"
+    group: "{{ admin_username }}"
+
+- name: Create .ssh directory
+  file:
+    path: "/home/{{ admin_username }}/.ssh"
+    state: directory
+    owner: "{{ admin_username }}"
+    group: "{{ admin_username }}"
+    mode: '0700'
+
+- name: Generate SSH key pair if not provided
+  openssh_keypair:
+    path: "/home/{{ admin_username }}/.ssh/id_{{ ssh_key_type }}"
+    type: "{{ ssh_key_type }}"
+    size: "{{ ssh_key_bits if ssh_key_type == 'rsa' else omit }}"
+    owner: "{{ admin_username }}"
+    group: "{{ admin_username }}"
+    mode: '0600'
+  when: ssh_public_key == ""
+  register: generated_keypair
+
+- name: Set up authorized_keys with provided public key
+  authorized_key:
+    user: "{{ admin_username }}"
+    key: "{{ ssh_public_key }}"
+    state: present
+    exclusive: yes
+  when: ssh_public_key != ""
+
+- name: Set up authorized_keys with generated public key
+  authorized_key:
+    user: "{{ admin_username }}"
+    key: "{{ generated_keypair.public_key }}"
+    state: present
+    exclusive: yes
+  when: ssh_public_key == "" and generated_keypair is defined
+
+- name: Configure sudo for admin user
+  template:
+    src: sudoers.j2
+    dest: "/etc/sudoers.d/{{ admin_username }}"
+    owner: root
+    group: root
+    mode: '0440'
+    validate: 'visudo -cf %s'
+
+- name: Create SSH banner
+  copy:
+    content: "{{ ssh_banner_text }}"
+    dest: /etc/ssh/banner
+    owner: root
+    group: root
+    mode: '0644'
+  when: ssh_banner_enabled
+  notify: restart ssh
+
+- name: Configure SSH daemon
+  template:
+    src: sshd_config.j2
+    dest: /etc/ssh/sshd_config
+    owner: root
+    group: root
+    mode: '0644'
+    backup: yes
+  notify: restart ssh
+
+- name: Disable root login
+  lineinfile:
+    path: /etc/ssh/sshd_config
+    regexp: '^#?PermitRootLogin'
+    line: 'PermitRootLogin no'
+    state: present
+  when: disable_root_login
+  notify: restart ssh
+
+- name: Disable password authentication
+  lineinfile:
+    path: /etc/ssh/sshd_config
+    regexp: '^#?PasswordAuthentication'
+    line: 'PasswordAuthentication no'
+    state: present
+  when: disable_password_auth
+  notify: restart ssh
+
+- name: Create bash configuration for admin user
+  template:
+    src: bashrc.j2
+    dest: "/home/{{ admin_username }}/.bashrc"
+    owner: "{{ admin_username }}"
+    group: "{{ admin_username }}"
+    mode: '0644'
+    backup: yes
+  when: bash_customization_enabled
+
+- name: Create bash aliases for admin user
+  template:
+    src: bash_aliases.j2
+    dest: "/home/{{ admin_username }}/.bash_aliases"
+    owner: "{{ admin_username }}"
+    group: "{{ admin_username }}"
+    mode: '0644'
+  when: bash_customization_enabled
+
+- name: Set environment variables for admin user
+  template:
+    src: bash_profile.j2
+    dest: "/home/{{ admin_username }}/.bash_profile"
+    owner: "{{ admin_username }}"
+    group: "{{ admin_username }}"
+    mode: '0644'
+  when: bash_customization_enabled
+
+- name: Create matrix management scripts directory
+  file:
+    path: "/home/{{ admin_username }}/scripts"
+    state: directory
+    owner: "{{ admin_username }}"
+    group: "{{ admin_username }}"
+    mode: '0755'
+
+- name: Create matrix management wrapper scripts
+  template:
+    src: "{{ item.src }}"
+    dest: "/home/{{ admin_username }}/scripts/{{ item.dest }}"
+    owner: "{{ admin_username }}"
+    group: "{{ admin_username }}"
+    mode: '0755'
+  loop:
+    - { src: 'matrix-status.sh.j2', dest: 'matrix-status' }
+    - { src: 'matrix-logs.sh.j2', dest: 'matrix-logs' }
+    - { src: 'matrix-restart.sh.j2', dest: 'matrix-restart' }
+    - { src: 'matrix-backup.sh.j2', dest: 'matrix-backup' }
+    - { src: 'system-info.sh.j2', dest: 'system-info' }
+
+- name: Add scripts directory to PATH
+  lineinfile:
+    path: "/home/{{ admin_username }}/.bashrc"
+    line: 'export PATH="$HOME/scripts:$PATH"'
+    state: present
+  when: bash_customization_enabled
+
+- name: Create motd for admin user
+  template:
+    src: motd.j2
+    dest: /etc/motd
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: Lock root account
+  user:
+    name: root
+    password_lock: yes
+  when: disable_root_login
+
+- name: Display SSH key information
+  debug:
+    msg: |
+      Admin user '{{ admin_username }}' created successfully!
+
+      {% if ssh_public_key == "" and generated_keypair is defined %}
+      SSH key pair generated automatically.
+      Private key: /home/{{ admin_username }}/.ssh/id_{{ ssh_key_type }}
+      Public key: /home/{{ admin_username }}/.ssh/id_{{ ssh_key_type }}.pub
+
+      Copy the private key to your local machine to connect:
+      scp {{ admin_username }}@{{ inventory_hostname }}:.ssh/id_{{ ssh_key_type }} ~/.ssh/{{ inventory_hostname }}_{{ ssh_key_type }}
+      ssh -i ~/.ssh/{{ inventory_hostname }}_{{ ssh_key_type }} {{ admin_username }}@{{ inventory_hostname }}
+      {% endif %}
+
+      Management scripts available in ~/scripts/:
+      - matrix-status: Check Matrix server status
+      - matrix-logs: View Matrix server logs
+      - matrix-restart: Restart Matrix services
+      - matrix-backup: Create system backup
+      - system-info: Display system information

@@ -1,0 +1,72 @@
+---
+# Monitoring configuration
+monitoring_enabled: true
+
+# Node Exporter (Prometheus metrics)
+node_exporter_enabled: true
+node_exporter_version: "1.6.1"
+node_exporter_port: 9100
+node_exporter_user: "prometheus"
+node_exporter_group: "prometheus"
+
+# Prometheus configuration
+prometheus_enabled: false  # Set to true if you want local Prometheus
+prometheus_port: 9090
+prometheus_retention: "15d"
+prometheus_scrape_interval: "15s"
+
+# Grafana configuration
+grafana_enabled: false  # Set to true if you want local Grafana
+grafana_port: 3000
+grafana_admin_password: "admin"  # Change this!
+
+# Log monitoring
+logwatch_enabled: true
+logrotate_enabled: true
+rsyslog_enabled: true
+
+# System monitoring thresholds
+cpu_threshold: 80
+memory_threshold: 85
+disk_threshold: 90
+load_threshold: 5.0
+
+# Alert configuration
+alert_email: "{{ ssl_email | default('admin@localhost') }}"
+smtp_server: "localhost"
+smtp_port: 25
+
+# Log retention
+log_retention_days: 30
+log_compress_enabled: true
+
+# Service monitoring
+monitor_services:
+  - ssh
+  - nginx
+  - fail2ban
+  - ufw
+  - postgresql
+  - redis-server
+
+# File integrity monitoring
+aide_enabled: true
+aide_check_schedule: "0 2 * * *"
+
+# Security monitoring
+security_monitoring_enabled: true
+failed_login_threshold: 5
+unusual_process_monitoring: true
+
+# Backup monitoring
+backup_monitoring_enabled: true
+backup_retention_check: true
+
+# Network monitoring
+network_monitoring_enabled: true
+port_scan_detection: true
+
+# Performance monitoring
+performance_monitoring_enabled: true
+iostat_enabled: true
+netstat_enabled: true

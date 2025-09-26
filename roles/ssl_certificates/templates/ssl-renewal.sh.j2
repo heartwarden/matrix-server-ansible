@@ -1,0 +1,47 @@
+#!/bin/bash
+# SSL Certificate Renewal Script
+
+set -euo pipefail
+
+LOG_FILE="/var/log/ssl-renewal.log"
+DATE=$(date '+%Y-%m-%d %H:%M:%S')
+
+log() {
+    echo "[$DATE] $1" | tee -a "$LOG_FILE"
+}
+
+log "Starting SSL certificate renewal check"
+
+# Check if any certificates need renewal
+if /usr/bin/certbot renew --quiet --no-self-upgrade; then
+    log "Certificate renewal check completed successfully"
+
+    # Test nginx configuration
+    if nginx -t > /dev/null 2>&1; then
+        log "Nginx configuration test passed"
+
+        # Reload nginx
+        if systemctl reload nginx; then
+            log "Nginx reloaded successfully"
+        else
+            log "ERROR: Failed to reload nginx"
+            exit 1
+        fi
+    else
+        log "ERROR: Nginx configuration test failed"
+        exit 1
+    fi
+else
+    log "ERROR: Certificate renewal failed"
+    exit 1
+fi
+
+{% if ssl_backup_enabled %}
+# Run backup after successful renewal
+if [ -f "/usr/local/bin/ssl-backup.sh" ]; then
+    log "Running SSL certificate backup"
+    /usr/local/bin/ssl-backup.sh
+fi
+{% endif %}
+
+log "SSL renewal process completed"

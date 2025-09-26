@@ -1,0 +1,80 @@
+---
+# UFW firewall configuration
+ufw_enabled: true
+ufw_policy_direction: incoming
+ufw_policy_default: deny
+ufw_logging: "on"
+
+# Basic rules
+ufw_rules:
+  # SSH access
+  - rule: allow
+    port: "{{ ssh_port | default(2222) }}"
+    proto: tcp
+    comment: "SSH access"
+
+  # HTTP/HTTPS
+  - rule: allow
+    port: "80"
+    proto: tcp
+    comment: "HTTP"
+
+  - rule: allow
+    port: "443"
+    proto: tcp
+    comment: "HTTPS"
+
+  # Matrix federation
+  - rule: allow
+    port: "8448"
+    proto: tcp
+    comment: "Matrix federation"
+
+  # TURN server for Matrix VoIP
+  - rule: allow
+    port: "3478"
+    proto: tcp
+    comment: "TURN TCP"
+
+  - rule: allow
+    port: "3478"
+    proto: udp
+    comment: "TURN UDP"
+
+  # TURN server port range for Matrix VoIP
+  - rule: allow
+    port: "49152:65535"
+    proto: udp
+    comment: "TURN port range"
+
+# Advanced rules with rate limiting
+ufw_rate_limit_rules:
+  - rule: limit
+    port: "{{ ssh_port | default(2222) }}"
+    proto: tcp
+    comment: "SSH rate limiting"
+
+# IP-based rules (whitelist specific IPs if needed)
+ufw_ip_rules: []
+  # - rule: allow
+  #   from_ip: "192.168.1.0/24"
+  #   comment: "Local network"
+
+# Application-specific rules
+ufw_application_rules: []
+  # - rule: allow
+  #   name: "OpenSSH"
+
+# Delete existing rules before applying new ones
+ufw_reset_rules: false
+
+# Log level (off, low, medium, high, full)
+ufw_log_level: "low"
+
+# Enable IPv6
+ufw_ipv6: true
+
+# Default policies
+ufw_default_incoming_policy: "deny"
+ufw_default_outgoing_policy: "allow"
+ufw_default_forward_policy: "deny"

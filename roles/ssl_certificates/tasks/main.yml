@@ -1,0 +1,190 @@
+---
+- name: Install certbot and dependencies
+  apt:
+    name:
+      - certbot
+      - python3-certbot-nginx
+      - openssl
+    state: present
+    update_cache: yes
+
+- name: Create webroot directory for Let's Encrypt
+  file:
+    path: "{{ letsencrypt_webroot_path }}"
+    state: directory
+    owner: www-data
+    group: www-data
+    mode: '0755'
+
+- name: Create SSL directories
+  file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+  loop:
+    - "{{ ssl_cert_path }}"
+    - "{{ ssl_key_path }}"
+    - "{{ ssl_backup_path }}"
+
+- name: Set proper permissions on SSL private key directory
+  file:
+    path: "{{ ssl_key_path }}"
+    mode: '0700'
+
+- name: Check if DH parameters exist
+  stat:
+    path: "{{ ssl_dhparam_path }}"
+  register: dhparam_stat
+
+- name: Generate DH parameters (this may take a while)
+  command: "openssl dhparam -out {{ ssl_dhparam_path }} {{ ssl_dhparam_size }}"
+  when: not dhparam_stat.stat.exists
+  register: dhparam_generation
+  async: 3600
+  poll: 30
+
+- name: Set DH parameters permissions
+  file:
+    path: "{{ ssl_dhparam_path }}"
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: Create temporary nginx configuration for certificate validation
+  template:
+    src: nginx-letsencrypt-temp.conf.j2
+    dest: /etc/nginx/sites-available/letsencrypt-temp
+    owner: root
+    group: root
+    mode: '0644'
+  when: ssl_domains is defined and ssl_domains | length > 0
+
+- name: Enable temporary nginx configuration
+  file:
+    src: /etc/nginx/sites-available/letsencrypt-temp
+    dest: /etc/nginx/sites-enabled/letsencrypt-temp
+    state: link
+  when: ssl_domains is defined and ssl_domains | length > 0
+  notify: reload nginx
+
+- name: Test nginx configuration
+  command: nginx -t
+  when: ssl_domains is defined and ssl_domains | length > 0
+
+- name: Reload nginx to enable temporary configuration
+  systemd:
+    name: nginx
+    state: reloaded
+  when: ssl_domains is defined and ssl_domains | length > 0
+
+- name: Generate Let's Encrypt certificates
+  command: >
+    certbot certonly
+    --webroot
+    --webroot-path {{ letsencrypt_webroot_path }}
+    --email {{ ssl_acme_email }}
+    --agree-tos
+    --non-interactive
+    {% if letsencrypt_staging %}--staging{% endif %}
+    {% for domain in ssl_domains %}-d {{ domain }} {% endfor %}
+  register: certbot_result
+  when: ssl_domains is defined and ssl_domains | length > 0
+  changed_when: "'Congratulations' in certbot_result.stdout"
+
+- name: Remove temporary nginx configuration
+  file:
+    path: /etc/nginx/sites-enabled/letsencrypt-temp
+    state: absent
+  when: ssl_domains is defined and ssl_domains | length > 0
+  notify: reload nginx
+
+- name: Create certificate renewal script
+  template:
+    src: ssl-renewal.sh.j2
+    dest: /usr/local/bin/ssl-renewal.sh
+    owner: root
+    group: root
+    mode: '0755'
+  when: ssl_renewal_enabled
+
+- name: Create certificate renewal cron job
+  cron:
+    name: "SSL certificate renewal"
+    minute: "{{ ssl_renewal_minute }}"
+    hour: "{{ ssl_renewal_hour }}"
+    job: "/usr/local/bin/ssl-renewal.sh"
+    user: root
+  when: ssl_renewal_enabled
+
+- name: Create SSL security configuration for nginx
+  template:
+    src: ssl-security.conf.j2
+    dest: /etc/nginx/snippets/ssl-security.conf
+    owner: root
+    group: root
+    mode: '0644'
+  notify: reload nginx
+
+- name: Create certificate backup script
+  template:
+    src: ssl-backup.sh.j2
+    dest: /usr/local/bin/ssl-backup.sh
+    owner: root
+    group: root
+    mode: '0755'
+  when: ssl_backup_enabled
+
+- name: Create certificate backup cron job
+  cron:
+    name: "SSL certificate backup"
+    minute: "15"
+    hour: "2"
+    job: "/usr/local/bin/ssl-backup.sh"
+    user: root
+  when: ssl_backup_enabled
+
+- name: Set up certificate monitoring
+  template:
+    src: ssl-monitor.sh.j2
+    dest: /usr/local/bin/ssl-monitor.sh
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Create certificate monitoring cron job
+  cron:
+    name: "SSL certificate monitoring"
+    minute: "0"
+    hour: "6"
+    job: "/usr/local/bin/ssl-monitor.sh"
+    user: root
+
+- name: Create post-renewal hook directory
+  file:
+    path: /etc/letsencrypt/renewal-hooks/post
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Create post-renewal hook for nginx
+  template:
+    src: post-renewal-nginx.sh.j2
+    dest: /etc/letsencrypt/renewal-hooks/post/nginx
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Verify certificate installation
+  command: "openssl x509 -in /etc/letsencrypt/live/{{ ssl_domains[0] }}/cert.pem -text -noout"
+  register: cert_verification
+  when: ssl_domains is defined and ssl_domains | length > 0
+  changed_when: false
+  failed_when: cert_verification.rc != 0
+
+- name: Display certificate information
+  debug:
+    msg: "Certificate successfully installed for domains: {{ ssl_domains | join(', ') }}"
+  when: ssl_domains is defined and ssl_domains | length > 0

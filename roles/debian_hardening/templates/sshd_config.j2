@@ -1,0 +1,63 @@
+# SSH server configuration - hardened for security
+Port {{ ssh_port }}
+Protocol {{ ssh_protocol }}
+AddressFamily inet
+
+# Authentication
+LoginGraceTime {{ ssh_login_grace_time | default(60) }}
+PermitRootLogin {{ ssh_permit_root_login }}
+StrictModes yes
+MaxAuthTries {{ ssh_max_auth_tries }}
+MaxSessions {{ ssh_max_sessions }}
+PubkeyAuthentication {{ ssh_pubkey_authentication }}
+AuthorizedKeysFile .ssh/authorized_keys
+PasswordAuthentication {{ ssh_password_authentication }}
+PermitEmptyPasswords {{ ssh_permit_empty_passwords }}
+ChallengeResponseAuthentication {{ ssh_challenge_response_authentication }}
+GSSAPIAuthentication {{ ssh_gss_api_authentication }}
+HostbasedAuthentication {{ ssh_host_based_authentication }}
+PermitUserEnvironment {{ ssh_permit_user_environment }}
+UsePAM {{ ssh_use_pam }}
+
+# Connection settings
+ClientAliveInterval {{ ssh_client_alive_interval }}
+ClientAliveCountMax {{ ssh_client_alive_count_max }}
+TCPKeepAlive yes
+
+# Forwarding
+X11Forwarding {{ ssh_x11_forwarding }}
+AllowTcpForwarding {{ ssh_tcp_forwarding }}
+AllowAgentForwarding {{ ssh_agent_forwarding }}
+GatewayPorts {{ ssh_gateway_ports }}
+PermitTunnel {{ ssh_permit_tunnel }}
+
+# Misc
+PrintMotd {{ ssh_print_motd }}
+PrintLastLog yes
+Compression {{ ssh_compression }}
+UsePrivilegeSeparation sandbox
+VersionAddendum none
+
+# Logging
+SyslogFacility AUTH
+LogLevel VERBOSE
+
+# Host keys
+HostKey /etc/ssh/ssh_host_rsa_key
+HostKey /etc/ssh/ssh_host_ecdsa_key
+HostKey /etc/ssh/ssh_host_ed25519_key
+
+# Ciphers and algorithms (only strong ones)
+Ciphers chacha20-poly1305@openssh.com,aes256-gcm@openssh.com,aes128-gcm@openssh.com,aes256-ctr,aes192-ctr,aes128-ctr
+MACs hmac-sha2-256-etm@openssh.com,hmac-sha2-512-etm@openssh.com,hmac-sha2-256,hmac-sha2-512
+KexAlgorithms curve25519-sha256@libssh.org,diffie-hellman-group16-sha512,diffie-hellman-group18-sha512,diffie-hellman-group14-sha256
+
+# Banner
+Banner /etc/ssh/banner
+
+# Allow only specific users (uncomment and modify as needed)
+# AllowUsers user1 user2
+# AllowGroups ssh-users
+
+# Subsystem
+Subsystem sftp /usr/lib/openssh/sftp-server -f AUTHPRIV -l INFO

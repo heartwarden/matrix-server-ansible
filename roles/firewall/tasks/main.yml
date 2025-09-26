@@ -1,0 +1,131 @@
+---
+- name: Install UFW
+  apt:
+    name: ufw
+    state: present
+    update_cache: yes
+
+- name: Reset UFW rules if requested
+  ufw:
+    state: reset
+  when: ufw_reset_rules | default(false)
+
+- name: Configure UFW default policies
+  ufw:
+    direction: "{{ item.direction }}"
+    policy: "{{ item.policy }}"
+  loop:
+    - { direction: 'incoming', policy: "{{ ufw_default_incoming_policy }}" }
+    - { direction: 'outgoing', policy: "{{ ufw_default_outgoing_policy }}" }
+    - { direction: 'routed', policy: "{{ ufw_default_forward_policy }}" }
+
+- name: Configure UFW logging
+  ufw:
+    logging: "{{ ufw_log_level }}"
+
+- name: Allow outgoing traffic for essential services
+  ufw:
+    rule: allow
+    direction: out
+    port: "{{ item.port }}"
+    proto: "{{ item.proto }}"
+    comment: "{{ item.comment }}"
+  loop:
+    - { port: "53", proto: "udp", comment: "DNS" }
+    - { port: "53", proto: "tcp", comment: "DNS TCP" }
+    - { port: "80", proto: "tcp", comment: "HTTP outbound" }
+    - { port: "443", proto: "tcp", comment: "HTTPS outbound" }
+    - { port: "123", proto: "udp", comment: "NTP" }
+
+- name: Configure UFW rules
+  ufw:
+    rule: "{{ item.rule }}"
+    port: "{{ item.port | default(omit) }}"
+    proto: "{{ item.proto | default(omit) }}"
+    src: "{{ item.src | default(omit) }}"
+    dest: "{{ item.dest | default(omit) }}"
+    from_ip: "{{ item.from_ip | default(omit) }}"
+    to_ip: "{{ item.to_ip | default(omit) }}"
+    comment: "{{ item.comment | default(omit) }}"
+  loop: "{{ ufw_rules }}"
+  notify: reload ufw
+
+- name: Configure UFW rate limiting rules
+  ufw:
+    rule: "{{ item.rule }}"
+    port: "{{ item.port | default(omit) }}"
+    proto: "{{ item.proto | default(omit) }}"
+    src: "{{ item.src | default(omit) }}"
+    dest: "{{ item.dest | default(omit) }}"
+    from_ip: "{{ item.from_ip | default(omit) }}"
+    to_ip: "{{ item.to_ip | default(omit) }}"
+    comment: "{{ item.comment | default(omit) }}"
+  loop: "{{ ufw_rate_limit_rules }}"
+  notify: reload ufw
+
+- name: Configure UFW IP-based rules
+  ufw:
+    rule: "{{ item.rule }}"
+    port: "{{ item.port | default(omit) }}"
+    proto: "{{ item.proto | default(omit) }}"
+    src: "{{ item.src | default(omit) }}"
+    dest: "{{ item.dest | default(omit) }}"
+    from_ip: "{{ item.from_ip | default(omit) }}"
+    to_ip: "{{ item.to_ip | default(omit) }}"
+    comment: "{{ item.comment | default(omit) }}"
+  loop: "{{ ufw_ip_rules }}"
+  notify: reload ufw
+  when: ufw_ip_rules is defined and ufw_ip_rules | length > 0
+
+- name: Configure UFW application rules
+  ufw:
+    rule: "{{ item.rule }}"
+    name: "{{ item.name }}"
+    comment: "{{ item.comment | default(omit) }}"
+  loop: "{{ ufw_application_rules }}"
+  notify: reload ufw
+  when: ufw_application_rules is defined and ufw_application_rules | length > 0
+
+- name: Enable UFW
+  ufw:
+    state: enabled
+  when: ufw_enabled
+
+- name: Disable UFW
+  ufw:
+    state: disabled
+  when: not ufw_enabled
+
+- name: Configure iptables for additional security
+  template:
+    src: iptables-security.j2
+    dest: /etc/iptables/rules.security
+    owner: root
+    group: root
+    mode: '0644'
+  notify: reload iptables
+
+- name: Create UFW application profile for Matrix
+  template:
+    src: ufw-matrix.j2
+    dest: /etc/ufw/applications.d/matrix
+    owner: root
+    group: root
+    mode: '0644'
+  notify: reload ufw
+
+- name: Configure fail2ban UFW integration
+  template:
+    src: fail2ban-ufw.conf.j2
+    dest: /etc/fail2ban/action.d/ufw.conf
+    owner: root
+    group: root
+    mode: '0644'
+  notify: restart fail2ban
+
+- name: Ensure UFW is enabled at boot
+  systemd:
+    name: ufw
+    enabled: yes
+    state: started
+  when: ufw_enabled

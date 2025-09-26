@@ -1,0 +1,64 @@
+[DEFAULT]
+# Ban time in seconds (1 hour)
+bantime = 3600
+
+# Find time window (10 minutes)
+findtime = 600
+
+# Number of failures before ban
+maxretry = 5
+
+# Destination email for alerts
+destemail = root@localhost
+
+# Action to take when banning
+action = %(action_mwl)s
+
+[sshd]
+enabled = true
+port = ssh
+filter = sshd
+logpath = /var/log/auth.log
+maxretry = 3
+bantime = 7200
+
+[nginx-http-auth]
+enabled = true
+port = http,https
+filter = nginx-http-auth
+logpath = /var/log/nginx/error.log
+maxretry = 3
+
+[nginx-limit-req]
+enabled = true
+port = http,https
+filter = nginx-limit-req
+logpath = /var/log/nginx/error.log
+maxretry = 10
+
+[nginx-botsearch]
+enabled = true
+port = http,https
+filter = nginx-botsearch
+logpath = /var/log/nginx/access.log
+maxretry = 2
+
+[postfix]
+enabled = true
+port = smtp,465,submission
+filter = postfix
+logpath = /var/log/mail.log
+
+[dovecot]
+enabled = true
+port = pop3,pop3s,imap,imaps,submission,465,sieve
+filter = dovecot
+logpath = /var/log/mail.log
+
+[matrix-synapse]
+enabled = true
+port = 8008,8448
+filter = matrix-synapse
+logpath = /var/log/matrix-synapse/homeserver.log
+maxretry = 3
+bantime = 3600

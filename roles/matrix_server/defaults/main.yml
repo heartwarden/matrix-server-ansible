@@ -1,0 +1,104 @@
+---
+# Matrix server configuration
+matrix_domain: "{{ matrix_domain }}"
+matrix_homeserver_name: "{{ matrix_homeserver_name }}"
+
+# Synapse configuration
+matrix_synapse_version: "latest"
+matrix_synapse_user: "matrix-synapse"
+matrix_synapse_group: "matrix-synapse"
+matrix_synapse_home: "/opt/synapse"
+matrix_synapse_config_dir: "/etc/matrix-synapse"
+matrix_synapse_data_dir: "/var/lib/matrix-synapse"
+matrix_synapse_log_dir: "/var/log/matrix-synapse"
+
+# Database configuration
+matrix_database_engine: "postgresql"
+matrix_database_host: "localhost"
+matrix_database_port: 5432
+matrix_database_name: "synapse"
+matrix_database_user: "synapse"
+matrix_database_password: "{{ vault_matrix_database_password | default('changeme') }}"
+
+# Redis configuration
+matrix_redis_enabled: true
+matrix_redis_host: "localhost"
+matrix_redis_port: 6379
+matrix_redis_password: ""
+
+# Element web client
+matrix_element_enabled: true
+matrix_element_version: "latest"
+matrix_element_path: "/var/www/element"
+
+# Coturn (TURN server)
+matrix_coturn_enabled: true
+matrix_coturn_realm: "{{ matrix_domain }}"
+matrix_coturn_secret: "{{ vault_coturn_secret | default('changeme') }}"
+matrix_coturn_external_ip: "{{ ansible_default_ipv4.address }}"
+matrix_coturn_min_port: 49152
+matrix_coturn_max_port: 65535
+
+# Registration and security
+matrix_registration_enabled: false
+matrix_registration_shared_secret: "{{ vault_registration_secret | default('') }}"
+matrix_guest_access_enabled: false
+matrix_federation_enabled: true
+matrix_presence_enabled: true
+matrix_typing_enabled: true
+matrix_receipts_enabled: true
+
+# File uploads
+matrix_max_upload_size: "50M"
+matrix_uploads_path: "{{ matrix_synapse_data_dir }}/uploads"
+
+# Log configuration
+matrix_log_level: "INFO"
+matrix_log_size: "100MB"
+matrix_log_count: 10
+
+# Security settings
+matrix_bcrypt_rounds: 12
+matrix_trusted_key_servers:
+  - server_name: "matrix.org"
+    verify_keys:
+      "ed25519:auto": "Noi6WqcDj0QmPxCNQqgezwTlBKrfqehY1u2FyWP9uYw"
+
+# Rate limiting
+matrix_rc_message_per_second: 0.2
+matrix_rc_message_burst_count: 10.0
+matrix_rc_registration_per_second: 0.17
+matrix_rc_registration_burst_count: 3.0
+
+# Media repository
+matrix_media_store_path: "{{ matrix_synapse_data_dir }}/media_store"
+matrix_max_image_pixels: "32M"
+matrix_max_spider_size: "10M"
+
+# URL previews
+matrix_url_preview_enabled: false
+matrix_url_preview_ip_range_blacklist:
+  - '127.0.0.0/8'
+  - '10.0.0.0/8'
+  - '172.16.0.0/12'
+  - '192.168.0.0/16'
+  - '100.64.0.0/10'
+  - '169.254.0.0/16'
+  - '::1/128'
+  - 'fe80::/64'
+  - 'fc00::/7'
+
+# Workers (for horizontal scaling)
+matrix_workers_enabled: false
+
+# Push notifications
+matrix_push_enabled: true
+
+# Statistics and metrics
+matrix_metrics_enabled: true
+matrix_metrics_port: 9092
+
+# Backup configuration
+matrix_backup_enabled: true
+matrix_backup_schedule: "0 2 * * *"
+matrix_backup_retention_days: 7

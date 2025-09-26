@@ -1,0 +1,62 @@
+// Enable automatic updates
+Unattended-Upgrade::Allowed-Origins {
+    "${distro_id}:${distro_codename}";
+    "${distro_id}:${distro_codename}-security";
+    "${distro_id}ESM:${distro_codename}";
+};
+
+// Additional packages to update
+Unattended-Upgrade::Package-Whitelist {
+};
+
+// Packages to never update
+Unattended-Upgrade::Package-Blacklist {
+};
+
+// Split the upgrade into the smallest possible chunks so that
+// they can be interrupted with SIGTERM
+Unattended-Upgrade::MinimalSteps "true";
+
+// Install updates when the machine is shuting down
+Unattended-Upgrade::InstallOnShutdown "false";
+
+// Send email to this address for problems or packages upgrades
+Unattended-Upgrade::Mail "{{ ssl_email | default('') }}";
+
+// Set this value to "true" to get emails only on errors
+Unattended-Upgrade::MailOnlyOnError "true";
+
+// Remove unused automatically installed kernel-related packages
+Unattended-Upgrade::Remove-Unused-Kernel-Packages "true";
+
+// Remove new unused dependencies after the upgrade
+Unattended-Upgrade::Remove-New-Unused-Dependencies "true";
+
+// Remove unused dependencies after the upgrade
+Unattended-Upgrade::Remove-Unused-Dependencies "true";
+
+// Automatically reboot *WITHOUT CONFIRMATION* if the file /var/run/reboot-required is found after the upgrade
+{% if auto_reboot_if_required | default(false) %}
+Unattended-Upgrade::Automatic-Reboot "true";
+
+// If automatic reboot is enabled and needed, reboot at the specific time
+Unattended-Upgrade::Automatic-Reboot-Time "{{ auto_reboot_time | default('02:00') }}";
+
+// Use /usr/share/unattended-upgrades/unattended-upgrade-shutdown --wait-for-signal
+Unattended-Upgrade::Automatic-Reboot-WithUsers "false";
+{% else %}
+Unattended-Upgrade::Automatic-Reboot "false";
+{% endif %}
+
+// Enable logging to syslog
+Unattended-Upgrade::SyslogEnable "true";
+Unattended-Upgrade::SyslogFacility "daemon";
+
+// Download and install upgrades only on AC power
+Unattended-Upgrade::OnlyOnACPower "false";
+
+// Download and install upgrades only on non-metered connection
+Unattended-Upgrade::Skip-Updates-On-Metered-Connections "true";
+
+// Verbose logging
+Unattended-Upgrade::Verbose "false";

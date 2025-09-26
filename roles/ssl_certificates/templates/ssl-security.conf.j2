@@ -1,0 +1,32 @@
+# SSL Security Configuration
+ssl_protocols {{ ssl_protocols }};
+ssl_ciphers {{ ssl_ciphers }};
+ssl_prefer_server_ciphers {{ ssl_prefer_server_ciphers }};
+
+# DH Parameters
+ssl_dhparam {{ ssl_dhparam_path }};
+
+# OCSP Stapling
+{% if ssl_ocsp_stapling %}
+ssl_stapling on;
+ssl_stapling_verify on;
+ssl_trusted_certificate /etc/letsencrypt/live/{{ ssl_domains[0] if ssl_domains is defined and ssl_domains | length > 0 else 'example.com' }}/chain.pem;
+resolver 8.8.8.8 8.8.4.4 valid=300s;
+resolver_timeout 5s;
+{% endif %}
+
+# Security headers
+add_header Strict-Transport-Security "max-age={{ ssl_hsts_max_age }}{% if ssl_hsts_include_subdomains %}; includeSubDomains{% endif %}{% if ssl_hsts_preload %}; preload{% endif %}" always;
+add_header X-Frame-Options DENY always;
+add_header X-Content-Type-Options nosniff always;
+add_header X-XSS-Protection "1; mode=block" always;
+add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+add_header Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self'; media-src 'self'; object-src 'none'; child-src 'none'; frame-src 'none'; worker-src 'none'; frame-ancestors 'none'; form-action 'self'; base-uri 'self'" always;
+
+# SSL session configuration
+ssl_session_cache shared:SSL:10m;
+ssl_session_timeout 1d;
+ssl_session_tickets off;
+
+# Buffer size optimization
+ssl_buffer_size 4k;

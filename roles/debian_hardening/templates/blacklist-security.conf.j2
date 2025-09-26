@@ -1,0 +1,36 @@
+# Blacklist insecure and unnecessary kernel modules
+
+# Disable rare network protocols
+blacklist dccp
+blacklist sctp
+blacklist rds
+blacklist tipc
+
+# Disable USB storage (uncomment if not needed)
+# blacklist usb-storage
+
+# Disable firewire (uncomment if not needed)
+# blacklist firewire-core
+
+# Disable bluetooth (uncomment if not needed)
+# blacklist bluetooth
+
+# Disable uncommon filesystems
+blacklist cramfs
+blacklist freevxfs
+blacklist jffs2
+blacklist hfs
+blacklist hfsplus
+blacklist squashfs
+blacklist udf
+
+# Disable legacy protocols
+blacklist af_802154
+blacklist ieee802154
+blacklist ipx
+blacklist appletalk
+blacklist psnap
+blacklist p8023
+blacklist p8022
+blacklist can
+blacklist atm

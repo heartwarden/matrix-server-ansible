@@ -1,0 +1,215 @@
+---
+- name: System maintenance playbook
+  hosts: all
+  become: yes
+  gather_facts: yes
+
+  vars:
+    maintenance_mode: false
+    backup_before_update: true
+    reboot_if_required: false
+
+  pre_tasks:
+    - name: Check if maintenance mode is acknowledged
+      pause:
+        prompt: |
+          ========================================
+          SYSTEM MAINTENANCE MODE
+          ========================================
+
+          This playbook will perform:
+          - System updates
+          - Security patches
+          - Log rotation
+          - Cache cleanup
+          - Service health checks
+          - Backup operations
+
+          ⚠️  This may cause temporary service disruption.
+
+          Continue? Press ENTER to proceed or Ctrl+C to abort.
+      when: not maintenance_mode
+
+  tasks:
+    - name: Create maintenance log
+      file:
+        path: "/var/log/maintenance-{{ ansible_date_time.date }}.log"
+        state: touch
+        owner: root
+        group: root
+        mode: '0644'
+
+    - name: Log maintenance start
+      lineinfile:
+        path: "/var/log/maintenance-{{ ansible_date_time.date }}.log"
+        line: "[{{ ansible_date_time.iso8601 }}] Maintenance started by {{ ansible_user_id }}"
+
+    - name: Stop non-essential services during maintenance
+      systemd:
+        name: "{{ item }}"
+        state: stopped
+      loop:
+        - logwatch
+      ignore_errors: yes
+
+    - name: Backup system before updates
+      include_tasks: backup_system.yml
+      when: backup_before_update
+
+    - name: Update package cache
+      apt:
+        update_cache: yes
+        cache_valid_time: 0
+
+    - name: Check for available updates
+      command: apt list --upgradable
+      register: available_updates
+      changed_when: false
+
+    - name: Apply security updates
+      apt:
+        upgrade: dist
+        update_cache: yes
+        autoremove: yes
+        autoclean: yes
+      register: system_update
+
+    - name: Clean package cache
+      apt:
+        autoclean: yes
+        autoremove: yes
+
+    - name: Rotate logs
+      command: logrotate -f /etc/logrotate.conf
+      ignore_errors: yes
+
+    - name: Clean temporary files
+      shell: |
+        find /tmp -type f -atime +7 -delete 2>/dev/null || true
+        find /var/tmp -type f -atime +30 -delete 2>/dev/null || true
+        find /var/log -name "*.gz" -mtime +30 -delete 2>/dev/null || true
+
+    - name: Update AIDE database
+      command: aide --update
+      async: 1800
+      poll: 0
+      register: aide_update
+      when: aide_enabled | default(true)
+
+    - name: Check for rootkits
+      command: rkhunter --update --check --sk
+      register: rkhunter_check
+      ignore_errors: yes
+      async: 1800
+      poll: 0
+
+    - name: Check system services
+      systemd:
+        name: "{{ item }}"
+        state: started
+        enabled: yes
+      loop: "{{ monitor_services | default(['ssh', 'nginx']) }}"
+      register: service_check
+
+    - name: Generate system health report
+      template:
+        src: health_report.j2
+        dest: "/var/log/health-report-{{ ansible_date_time.date }}.txt"
+        owner: root
+        group: root
+        mode: '0644'
+
+    - name: Check disk space
+      shell: df -h | grep -E '^/dev/' | awk '$5 >= 85 { print $0 }'
+      register: disk_space_check
+      changed_when: false
+      failed_when: false
+
+    - name: Check memory usage
+      shell: free | grep Mem | awk '{printf "%.0f", ($3/$2)*100}'
+      register: memory_usage
+      changed_when: false
+
+    - name: Check system load
+      shell: uptime | awk -F'load average:' '{print $2}' | awk -F',' '{print $1}' | xargs
+      register: system_load
+      changed_when: false
+
+    - name: Restart services if needed
+      systemd:
+        name: "{{ item }}"
+        state: restarted
+      loop:
+        - fail2ban
+        - rsyslog
+      when: system_update.changed
+
+    - name: Check for reboot requirement
+      stat:
+        path: /var/run/reboot-required
+      register: reboot_required
+
+    - name: Reboot system if required and authorized
+      reboot:
+        reboot_timeout: 300
+        pre_reboot_delay: 30
+        post_reboot_delay: 30
+        msg: "Rebooting for kernel updates"
+      when: reboot_required.stat.exists and reboot_if_required
+
+    - name: Wait for services to start after reboot
+      wait_for:
+        port: "{{ ansible_ssh_port | default(22) }}"
+        host: "{{ ansible_ssh_host | default(inventory_hostname) }}"
+        delay: 30
+        timeout: 300
+      delegate_to: localhost
+      when: reboot_required.stat.exists and reboot_if_required
+
+    - name: Verify Matrix services after maintenance
+      systemd:
+        name: "{{ item }}"
+        state: started
+      loop:
+        - matrix-synapse
+        - nginx
+        - postgresql
+        - redis-server
+      when: "'matrix_servers' in group_names"
+      register: matrix_services_check
+
+    - name: Log maintenance completion
+      lineinfile:
+        path: "/var/log/maintenance-{{ ansible_date_time.date }}.log"
+        line: "[{{ ansible_date_time.iso8601 }}] Maintenance completed successfully"
+
+    - name: Display maintenance summary
+      debug:
+        msg: |
+          =====================================
+          MAINTENANCE SUMMARY
+          =====================================
+
+          📦 Updates: {{ 'Applied' if system_update.changed else 'No updates available' }}
+          🔄 Services: {{ 'All running' if service_check is succeeded else 'Some issues detected' }}
+          💾 Disk Usage: {{ 'OK' if disk_space_check.stdout == '' else 'WARNING - High usage detected' }}
+          🧠 Memory: {{ memory_usage.stdout }}% used
+          📊 Load: {{ system_load.stdout }}
+          🔄 Reboot: {{ 'Required' if reboot_required.stat.exists else 'Not needed' }}
+
+          📁 Reports Generated:
+          - Maintenance log: /var/log/maintenance-{{ ansible_date_time.date }}.log
+          - Health report: /var/log/health-report-{{ ansible_date_time.date }}.txt
+
+          {% if disk_space_check.stdout != '' %}
+          ⚠️  DISK SPACE WARNING:
+          {{ disk_space_check.stdout }}
+          {% endif %}
+
+          {% if reboot_required.stat.exists and not reboot_if_required %}
+          ⚠️  REBOOT REQUIRED:
+          System reboot is required for kernel updates.
+          Run with -e reboot_if_required=true to auto-reboot.
+          {% endif %}
+
+          ✅ Maintenance completed successfully!

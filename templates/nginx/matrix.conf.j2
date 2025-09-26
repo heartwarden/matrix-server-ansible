@@ -1,0 +1,187 @@
+# Matrix Synapse and Element configuration
+server {
+    listen 80;
+    server_name {{ matrix_domain }} {{ matrix_homeserver_name }};
+
+    # Redirect to HTTPS
+    location / {
+        return 301 https://$server_name$request_uri;
+    }
+
+    # Let's Encrypt challenge
+    location /.well-known/acme-challenge/ {
+        root {{ letsencrypt_webroot_path | default('/var/www/letsencrypt') }};
+        try_files $uri =404;
+    }
+}
+
+# Matrix homeserver
+server {
+    listen 443 ssl http2;
+    listen [::]:443 ssl http2;
+    server_name {{ matrix_homeserver_name }};
+
+    # SSL configuration
+    ssl_certificate /etc/letsencrypt/live/{{ matrix_domain }}/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/{{ matrix_domain }}/privkey.pem;
+    include /etc/nginx/snippets/ssl-security.conf;
+
+    # Security headers
+    add_header X-Frame-Options DENY always;
+    add_header X-Content-Type-Options nosniff always;
+    add_header X-XSS-Protection "1; mode=block" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+
+    # Rate limiting
+    limit_req_zone $binary_remote_addr zone=matrix:10m rate=10r/s;
+    limit_req zone=matrix burst=50 nodelay;
+
+    # Client API
+    location ~ ^(/_matrix|/_synapse/client) {
+        proxy_pass http://127.0.0.1:8008;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $http_host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Nginx-Proxy true;
+        proxy_redirect off;
+        proxy_buffering off;
+
+        client_max_body_size {{ matrix_max_upload_size | default('50M') }};
+    }
+
+    # Server-Server federation API
+    location ~ ^/_matrix/federation/ {
+        proxy_pass http://127.0.0.1:8008;
+        proxy_http_version 1.1;
+        proxy_set_header Host $http_host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    # Admin API (restrict access)
+    location ~ ^/_synapse/admin {
+        allow 127.0.0.1;
+        allow ::1;
+        {% for ip in admin_allowed_ips | default(['127.0.0.1']) %}
+        allow {{ ip }};
+        {% endfor %}
+        deny all;
+
+        proxy_pass http://127.0.0.1:8008;
+        proxy_http_version 1.1;
+        proxy_set_header Host $http_host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    # Metrics endpoint (restrict access)
+    location /_synapse/metrics {
+        allow 127.0.0.1;
+        allow ::1;
+        {% for ip in monitoring_allowed_ips | default(['127.0.0.1']) %}
+        allow {{ ip }};
+        {% endfor %}
+        deny all;
+
+        proxy_pass http://127.0.0.1:{{ matrix_metrics_port | default(9092) }};
+        proxy_http_version 1.1;
+        proxy_set_header Host $http_host;
+    }
+
+    # Health check
+    location /health {
+        access_log off;
+        return 200 "healthy\n";
+        add_header Content-Type text/plain;
+    }
+}
+
+# Element web client
+server {
+    listen 443 ssl http2;
+    listen [::]:443 ssl http2;
+    server_name {{ matrix_domain }};
+
+    # SSL configuration
+    ssl_certificate /etc/letsencrypt/live/{{ matrix_domain }}/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/{{ matrix_domain }}/privkey.pem;
+    include /etc/nginx/snippets/ssl-security.conf;
+
+    # Security headers for Element
+    add_header X-Frame-Options SAMEORIGIN always;
+    add_header X-Content-Type-Options nosniff always;
+    add_header X-XSS-Protection "1; mode=block" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+    add_header Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self'; connect-src 'self' {{ matrix_homeserver_name }}; media-src 'self'; object-src 'none'; frame-src 'none'; worker-src 'self'; frame-ancestors 'self'" always;
+
+    root {{ matrix_element_path | default('/var/www/element') }};
+    index index.html;
+
+    # Element files
+    location / {
+        try_files $uri $uri/ /index.html;
+        expires 1h;
+        add_header Cache-Control "public, immutable";
+    }
+
+    # Element config
+    location ~ ^/(config\.json|version)$ {
+        add_header Cache-Control "no-cache";
+        try_files $uri =404;
+    }
+
+    # Well-known delegation for Matrix
+    location /.well-known/matrix/server {
+        return 200 '{"m.server": "{{ matrix_homeserver_name }}:443"}';
+        add_header Content-Type application/json;
+        add_header Access-Control-Allow-Origin *;
+        add_header Access-Control-Allow-Methods "GET, POST, PUT, DELETE, OPTIONS";
+        add_header Access-Control-Allow-Headers "Origin, X-Requested-With, Content-Type, Accept, Authorization";
+    }
+
+    location /.well-known/matrix/client {
+        return 200 '{"m.homeserver": {"base_url": "https://{{ matrix_homeserver_name }}"}}';
+        add_header Content-Type application/json;
+        add_header Access-Control-Allow-Origin *;
+        add_header Access-Control-Allow-Methods "GET, POST, PUT, DELETE, OPTIONS";
+        add_header Access-Control-Allow-Headers "Origin, X-Requested-With, Content-Type, Accept, Authorization";
+    }
+
+    # Health check
+    location /health {
+        access_log off;
+        return 200 "healthy\n";
+        add_header Content-Type text/plain;
+    }
+}
+
+# Federation port (8448)
+server {
+    listen 8448 ssl http2;
+    listen [::]:8448 ssl http2;
+    server_name {{ matrix_homeserver_name }};
+
+    # SSL configuration
+    ssl_certificate /etc/letsencrypt/live/{{ matrix_domain }}/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/{{ matrix_domain }}/privkey.pem;
+    include /etc/nginx/snippets/ssl-security.conf;
+
+    # Federation API
+    location / {
+        proxy_pass http://127.0.0.1:8008;
+        proxy_http_version 1.1;
+        proxy_set_header Host $http_host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_connect_timeout 30s;
+        proxy_send_timeout 30s;
+        proxy_read_timeout 30s;
+    }
+}

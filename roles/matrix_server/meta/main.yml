@@ -1,0 +1,21 @@
+---
+galaxy_info:
+  author: Server Admin
+  description: Secure Matrix (Synapse) server installation
+  company:
+  license: MIT
+  min_ansible_version: 2.9
+  platforms:
+    - name: Debian
+      versions:
+        - 12
+  galaxy_tags:
+    - matrix
+    - synapse
+    - communication
+    - federation
+dependencies:
+  - role: debian_hardening
+  - role: firewall
+  - role: ssl_certificates
+  - role: monitoring

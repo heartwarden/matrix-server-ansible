@@ -1,0 +1,90 @@
+#!/bin/bash
+# System monitoring script
+
+set -euo pipefail
+
+LOG_FILE="/var/log/monitoring/system-monitor.log"
+ALERT_SCRIPT="/usr/local/bin/send-alert.sh"
+DATE=$(date '+%Y-%m-%d %H:%M:%S')
+
+# Thresholds
+CPU_THRESHOLD={{ cpu_threshold }}
+MEMORY_THRESHOLD={{ memory_threshold }}
+DISK_THRESHOLD={{ disk_threshold }}
+LOAD_THRESHOLD={{ load_threshold }}
+
+log() {
+    echo "[$DATE] $1" | tee -a "$LOG_FILE"
+}
+
+# Check CPU usage
+check_cpu() {
+    local cpu_usage=$(top -bn1 | grep "Cpu(s)" | awk '{print $2}' | awk -F'%' '{print $1}')
+    cpu_usage=${cpu_usage%.*}  # Remove decimal places
+
+    if [[ $cpu_usage -gt $CPU_THRESHOLD ]]; then
+        log "ALERT: High CPU usage: ${cpu_usage}%"
+        "$ALERT_SCRIPT" "High CPU Usage" "CPU usage is ${cpu_usage}% (threshold: ${CPU_THRESHOLD}%)"
+    else
+        log "CPU usage: ${cpu_usage}%"
+    fi
+}
+
+# Check memory usage
+check_memory() {
+    local memory_info=$(free | grep "Mem:")
+    local total=$(echo $memory_info | awk '{print $2}')
+    local used=$(echo $memory_info | awk '{print $3}')
+    local memory_usage=$((used * 100 / total))
+
+    if [[ $memory_usage -gt $MEMORY_THRESHOLD ]]; then
+        log "ALERT: High memory usage: ${memory_usage}%"
+        "$ALERT_SCRIPT" "High Memory Usage" "Memory usage is ${memory_usage}% (threshold: ${MEMORY_THRESHOLD}%)"
+    else
+        log "Memory usage: ${memory_usage}%"
+    fi
+}
+
+# Check disk usage
+check_disk() {
+    while IFS= read -r line; do
+        local filesystem=$(echo "$line" | awk '{print $1}')
+        local usage=$(echo "$line" | awk '{print $5}' | sed 's/%//')
+        local mountpoint=$(echo "$line" | awk '{print $6}')
+
+        if [[ $usage -gt $DISK_THRESHOLD ]]; then
+            log "ALERT: High disk usage on $mountpoint: ${usage}%"
+            "$ALERT_SCRIPT" "High Disk Usage" "Disk usage on $mountpoint is ${usage}% (threshold: ${DISK_THRESHOLD}%)"
+        else
+            log "Disk usage on $mountpoint: ${usage}%"
+        fi
+    done < <(df -h | grep -E '^/dev/' | grep -v '/boot')
+}
+
+# Check system load
+check_load() {
+    local load_1min=$(uptime | awk -F'load average:' '{print $2}' | awk -F',' '{print $1}' | xargs)
+    local load_num=$(echo $load_1min | cut -d'.' -f1)
+
+    if (( $(echo "$load_1min > $LOAD_THRESHOLD" | bc -l) )); then
+        log "ALERT: High system load: $load_1min"
+        "$ALERT_SCRIPT" "High System Load" "System load is $load_1min (threshold: $LOAD_THRESHOLD)"
+    else
+        log "System load: $load_1min"
+    fi
+}
+
+# Main monitoring function
+main() {
+    mkdir -p "$(dirname "$LOG_FILE")"
+    log "Starting system monitoring check"
+
+    check_cpu
+    check_memory
+    check_disk
+    check_load
+
+    log "System monitoring check completed"
+}
+
+main "$@"

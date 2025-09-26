@@ -1,0 +1,41 @@
+---
+# Global configuration for all servers
+timezone: "UTC"
+ntp_servers:
+  - "0.debian.pool.ntp.org"
+  - "1.debian.pool.ntp.org"
+  - "2.debian.pool.ntp.org"
+  - "3.debian.pool.ntp.org"
+
+# Security settings
+ssh_port: 2222
+ssh_max_auth_tries: 3
+ssh_client_alive_interval: 300
+ssh_client_alive_count_max: 2
+ssh_login_grace_time: 60
+
+# Fail2Ban settings
+fail2ban_enabled: true
+fail2ban_bantime: 3600
+fail2ban_findtime: 600
+fail2ban_maxretry: 5
+
+# Firewall settings
+ufw_enabled: true
+ufw_default_policy_incoming: deny
+ufw_default_policy_outgoing: allow
+ufw_default_policy_forward: deny
+
+# Automatic updates
+unattended_upgrades_enabled: true
+auto_reboot_if_required: true
+auto_reboot_time: "03:00"
+
+# Monitoring
+monitoring_enabled: true
+log_retention_days: 30
+
+# System hardening
+disable_ipv6: false
+kernel_hardening_enabled: true
+sysctl_hardening_enabled: true

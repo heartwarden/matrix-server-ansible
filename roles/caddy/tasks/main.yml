@@ -99,6 +99,17 @@
     group: root
     mode: '0644'
 
+- name: Stop conflicting web servers
+  systemd:
+    name: "{{ item }}"
+    state: stopped
+    enabled: no
+  loop:
+    - nginx
+    - apache2
+    - httpd
+  ignore_errors: yes
+
 - name: Enable and start Caddy service
   systemd:
     name: caddy

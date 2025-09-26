@@ -5,13 +5,6 @@
 
     # ACME configuration
     email {{ monitoring_email | default('admin@' + inventory_hostname) }}
-
-    # Security
-    servers {
-        protocol {
-            experimental_http3
-        }
-    }
 }
 
 # Matrix homeserver

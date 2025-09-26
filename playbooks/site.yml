@@ -32,6 +32,9 @@
       changed_when: false
 
   roles:
+    - role: user_management
+      tags: ['users', 'ssh', 'security']
+
     - role: debian_hardening
       tags: ['hardening', 'security']
 
@@ -47,6 +50,9 @@
 
     - role: monitoring
       tags: ['monitoring', 'metrics']
+
+    - role: caddy
+      tags: ['webserver', 'proxy']
 
     - role: matrix_server
       tags: ['matrix', 'synapse', 'element']

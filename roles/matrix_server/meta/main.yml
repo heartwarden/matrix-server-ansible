@@ -14,8 +14,4 @@ galaxy_info:
     - synapse
     - communication
     - federation
-dependencies:
-  - role: debian_hardening
-  - role: firewall
-  - role: ssl_certificates
-  - role: monitoring
+dependencies: []

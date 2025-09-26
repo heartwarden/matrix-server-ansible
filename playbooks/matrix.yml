@@ -33,6 +33,9 @@
           - "{{ matrix_homeserver_name }}"
       tags: ['ssl']
 
+    - role: caddy
+      tags: ['webserver', 'proxy']
+
     - role: matrix_server
       tags: ['matrix', 'synapse', 'element', 'coturn']
 

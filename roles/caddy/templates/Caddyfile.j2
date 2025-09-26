@@ -18,8 +18,6 @@
     # Matrix Client API
     handle /_matrix/* {
         reverse_proxy 127.0.0.1:8008 {
-            header_up X-Forwarded-For {remote_host}
-            header_up X-Forwarded-Proto {scheme}
             header_up Host {host}
         }
     }
@@ -59,17 +57,14 @@
     # Health check
 {% if caddy_health_check_enabled | default(true) %}
     handle /health {
-        respond "Matrix server healthy" 200 {
-            header Content-Type "text/plain"
-        }
+        header Content-Type "text/plain"
+        respond "Matrix server healthy" 200
     }
 {% endif %}
 
     # Federation API
     handle {
         reverse_proxy 127.0.0.1:8008 {
-            header_up X-Forwarded-For {remote_host}
-            header_up X-Forwarded-Proto {scheme}
             header_up Host {host}
         }
     }
@@ -125,9 +120,8 @@ chat.{{ matrix_homeserver_name }} {
     # Health check
 {% if caddy_health_check_enabled | default(true) %}
     handle /health {
-        respond "Element web healthy" 200 {
-            header Content-Type "text/plain"
-        }
+        header Content-Type "text/plain"
+        respond "Element web healthy" 200
     }
 {% endif %}
 
@@ -156,8 +150,6 @@ chat.{{ matrix_homeserver_name }} {
     # Federation endpoint
     handle {
         reverse_proxy 127.0.0.1:8008 {
-            header_up X-Forwarded-For {remote_host}
-            header_up X-Forwarded-Proto {scheme}
             header_up Host {host}
         }
     }

@@ -307,18 +307,18 @@ all:
     matrix_servers:
       hosts:
         $SERVER_NAME:
-          ansible_host: $SERVER_IP
-          ansible_user: root  # Initial connection as root, will create zerokaine user
-          ansible_ssh_port: 22  # Initial SSH port, will change to $SSH_PORT
-          ansible_ssh_private_key_file: $(dirname "$SSH_KEY_PATH")/$(basename "$SSH_KEY_PATH" .pub)
+          ansible_connection: local
+          ansible_python_interpreter: /usr/bin/python3
           matrix_domain: $MATRIX_DOMAIN
           matrix_homeserver_name: $MATRIX_HOMESERVER
           ssl_email: $SSL_EMAIL
-      vars:
-        ansible_python_interpreter: /usr/bin/python3
-        become: yes
-        become_method: sudo
-        # Will switch to zerokaine user after initial setup
+          server_ip: $SERVER_IP
+          ssh_port: $SSH_PORT
+  vars:
+    ansible_become: yes
+    ansible_become_method: sudo
+    # Local deployment - Ansible runs on the target server
+    # SSH access from external machines will use zerokaine user on port $SSH_PORT
 EOF
 
     success "Inventory saved to: $inventory_file"
@@ -466,10 +466,10 @@ BANNER
         fi
     done
 
-    # Test connectivity
-    info "Testing SSH connectivity..."
-    if ! ansible all -i "$INVENTORY" -m ping; then
-        error "SSH connectivity test failed"
+    # Test local connectivity
+    info "Testing local connectivity..."
+    if ! ansible all -i "$INVENTORY" -m ping --connection=local; then
+        error "Local connectivity test failed"
         exit 1
     fi
 
@@ -539,7 +539,8 @@ Press OK to continue..." 20 80
     echo "   ./${SERVER_NAME}-deploy.sh"
     echo
     echo "4. Connect to server after deployment:"
-    echo "   ssh -i $(dirname "$SSH_KEY_PATH")/$(basename "$SSH_KEY_PATH" .pub) -p $SSH_PORT zerokaine@$SERVER_IP"
+    echo "   ssh -p $SSH_PORT zerokaine@$SERVER_IP"
+    echo "   (Uses the same SSH key currently in /root/.ssh/authorized_keys)"
 }
 
 cleanup() {

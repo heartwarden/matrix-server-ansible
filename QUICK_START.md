@@ -170,9 +170,12 @@ git commit -m "Initial Matrix server Ansible setup"
 git push -u origin main
 ```
 
-### Deploy From Any Machine
+### Deploy Locally on Target Server
 ```bash
-# Clone repository
+# SSH to your Debian 12 server
+ssh root@your-server-ip
+
+# Clone repository on the target server
 git clone https://github.com/your-username/matrix-server-ansible.git
 cd matrix-server-ansible
 
@@ -180,7 +183,7 @@ cd matrix-server-ansible
 ./scripts/setup.sh
 source activate
 
-# Configure and deploy
+# Configure and deploy locally
 ./scripts/configure-server.sh
 cd server-configs
 ./server-name-deploy.sh

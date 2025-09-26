@@ -225,6 +225,7 @@
     owner: root
     group: root
     mode: '0755'
+  when: false  # Disabled due to Jinja2 template conflicts
 
 - name: Create daily monitoring report cron job
   cron:
@@ -233,3 +234,4 @@
     hour: "8"
     job: "/usr/local/bin/monitoring-report.sh"
     user: root
+  when: false  # Disabled due to Jinja2 template conflicts

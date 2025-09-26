@@ -35,7 +35,7 @@ apt-get install -y python3 python3-pip whiptail openssl git
 pip3 install --break-system-packages ansible-core==2.15.8
 
 # Install required Ansible collections
-ansible-galaxy collection install ansible.posix community.crypto --force
+ansible-galaxy collection install ansible.posix community.general community.crypto ansible.utils --force
 ```
 
 #### 2. Configure Your Server

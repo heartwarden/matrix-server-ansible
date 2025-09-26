@@ -6,30 +6,21 @@
     update_cache: yes
 
 - name: Reset UFW rules if requested
-  ufw:
-    state: reset
+  command: ufw --force reset
   when: ufw_reset_rules | default(false)
 
 - name: Configure UFW default policies
-  ufw:
-    direction: "{{ item.direction }}"
-    policy: "{{ item.policy }}"
+  command: "ufw default {{ item.policy }} {{ item.direction }}"
   loop:
     - { direction: 'incoming', policy: "{{ ufw_default_incoming_policy }}" }
     - { direction: 'outgoing', policy: "{{ ufw_default_outgoing_policy }}" }
     - { direction: 'routed', policy: "{{ ufw_default_forward_policy }}" }
 
 - name: Configure UFW logging
-  ufw:
-    logging: "{{ ufw_log_level }}"
+  command: "ufw logging {{ ufw_log_level }}"
 
 - name: Allow outgoing traffic for essential services
-  ufw:
-    rule: allow
-    direction: out
-    port: "{{ item.port }}"
-    proto: "{{ item.proto }}"
-    comment: "{{ item.comment }}"
+  command: "ufw allow out {{ item.port }}/{{ item.proto }} comment '{{ item.comment }}'"
   loop:
     - { port: "53", proto: "udp", comment: "DNS" }
     - { port: "53", proto: "tcp", comment: "DNS TCP" }
@@ -37,63 +28,27 @@
     - { port: "443", proto: "tcp", comment: "HTTPS outbound" }
     - { port: "123", proto: "udp", comment: "NTP" }
 
-- name: Configure UFW rules
-  ufw:
-    rule: "{{ item.rule }}"
-    port: "{{ item.port | default(omit) }}"
-    proto: "{{ item.proto | default(omit) }}"
-    src: "{{ item.src | default(omit) }}"
-    dest: "{{ item.dest | default(omit) }}"
-    from_ip: "{{ item.from_ip | default(omit) }}"
-    to_ip: "{{ item.to_ip | default(omit) }}"
-    comment: "{{ item.comment | default(omit) }}"
-  loop: "{{ ufw_rules }}"
+- name: Generate UFW rules configuration script
+  template:
+    src: ufw-rules.sh.j2
+    dest: /tmp/ufw-rules.sh
+    mode: '0755'
+
+- name: Apply UFW rules from script
+  command: /bin/bash /tmp/ufw-rules.sh
   notify: reload ufw
 
-- name: Configure UFW rate limiting rules
-  ufw:
-    rule: "{{ item.rule }}"
-    port: "{{ item.port | default(omit) }}"
-    proto: "{{ item.proto | default(omit) }}"
-    src: "{{ item.src | default(omit) }}"
-    dest: "{{ item.dest | default(omit) }}"
-    from_ip: "{{ item.from_ip | default(omit) }}"
-    to_ip: "{{ item.to_ip | default(omit) }}"
-    comment: "{{ item.comment | default(omit) }}"
-  loop: "{{ ufw_rate_limit_rules }}"
-  notify: reload ufw
-
-- name: Configure UFW IP-based rules
-  ufw:
-    rule: "{{ item.rule }}"
-    port: "{{ item.port | default(omit) }}"
-    proto: "{{ item.proto | default(omit) }}"
-    src: "{{ item.src | default(omit) }}"
-    dest: "{{ item.dest | default(omit) }}"
-    from_ip: "{{ item.from_ip | default(omit) }}"
-    to_ip: "{{ item.to_ip | default(omit) }}"
-    comment: "{{ item.comment | default(omit) }}"
-  loop: "{{ ufw_ip_rules }}"
-  notify: reload ufw
-  when: ufw_ip_rules is defined and ufw_ip_rules | length > 0
-
-- name: Configure UFW application rules
-  ufw:
-    rule: "{{ item.rule }}"
-    name: "{{ item.name }}"
-    comment: "{{ item.comment | default(omit) }}"
-  loop: "{{ ufw_application_rules }}"
-  notify: reload ufw
-  when: ufw_application_rules is defined and ufw_application_rules | length > 0
+- name: Clean up UFW rules script
+  file:
+    path: /tmp/ufw-rules.sh
+    state: absent
 
 - name: Enable UFW
-  ufw:
-    state: enabled
+  command: ufw --force enable
   when: ufw_enabled
 
 - name: Disable UFW
-  ufw:
-    state: disabled
+  command: ufw --force disable
   when: not ufw_enabled
 
 - name: Create iptables configuration directory

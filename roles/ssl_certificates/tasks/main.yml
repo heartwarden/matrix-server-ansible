@@ -24,20 +24,38 @@
   changed_when: "'certbot' not in snap_install_result.stderr"
   failed_when: false
 
+- name: Check if snap certbot installation succeeded
+  stat:
+    path: /snap/bin/certbot
+  register: snap_certbot_check
+
+- name: Wait for snap certbot to be available
+  wait_for:
+    path: /snap/bin/certbot
+    timeout: 60
+  when: snap_certbot_check.stat.exists
+
 - name: Create certbot symlink
   file:
     src: /snap/bin/certbot
     dest: /usr/bin/certbot
     state: link
-  ignore_errors: yes
+    force: yes
+  when: snap_certbot_check.stat.exists
 
-- name: Create webroot directory for Let's Encrypt
-  file:
-    path: "{{ letsencrypt_webroot_path }}"
-    state: directory
-    owner: caddy
-    group: caddy
-    mode: '0755'
+- name: Fallback to system certbot if snap failed
+  apt:
+    name:
+      - certbot
+      - python3-certbot-apache
+    state: present
+  when: not snap_certbot_check.stat.exists
+
+- name: Display certbot installation method
+  debug:
+    msg: "Certbot installed via {{ 'snap' if snap_certbot_check.stat.exists else 'apt' }}"
+
+# Webroot directory not needed for standalone method
 
 - name: Create SSL directories
   file:

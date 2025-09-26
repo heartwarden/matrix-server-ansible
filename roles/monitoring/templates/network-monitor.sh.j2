@@ -1,0 +1,281 @@
+#!/bin/bash
+# Network monitoring script for Matrix server
+# Monitors network connectivity, performance, and security
+
+set -euo pipefail
+
+# Configuration
+LOG_FILE="/var/log/network-monitor.log"
+ALERT_EMAIL="{{ monitoring_email | default('root@localhost') }}"
+
+# Network settings
+EXTERNAL_HOSTS=("8.8.8.8" "1.1.1.1" "google.com")
+MATRIX_FEDERATION_TEST="{{ matrix_homeserver_name | default('matrix.localhost') }}"
+
+log() {
+    echo "$(date '+%Y-%m-%d %H:%M:%S') - $1" | tee -a "$LOG_FILE"
+}
+
+check_network_interfaces() {
+    log "=== Checking Network Interfaces ==="
+    local issues=0
+
+    # Check if primary interface is up
+    local primary_interface
+    primary_interface=$(ip route | grep default | awk '{print $5}' | head -1)
+
+    if [ -n "$primary_interface" ]; then
+        if ip link show "$primary_interface" | grep -q "state UP"; then
+            log "✓ Primary interface $primary_interface: UP"
+        else
+            log "✗ Primary interface $primary_interface: DOWN"
+            ((issues++))
+        fi
+
+        # Get IP address
+        local ip_addr
+        ip_addr=$(ip addr show "$primary_interface" | grep "inet " | awk '{print $2}' | cut -d/ -f1)
+        if [ -n "$ip_addr" ]; then
+            log "✓ Primary interface IP: $ip_addr"
+        else
+            log "✗ Primary interface has no IP address"
+            ((issues++))
+        fi
+    else
+        log "✗ No primary interface found"
+        ((issues++))
+    fi
+
+    return $issues
+}
+
+check_external_connectivity() {
+    log "=== Checking External Connectivity ==="
+    local issues=0
+
+    for host in "${EXTERNAL_HOSTS[@]}"; do
+        if ping -c 3 -W 5 "$host" >/dev/null 2>&1; then
+            log "✓ External connectivity to $host: OK"
+        else
+            log "✗ External connectivity to $host: FAILED"
+            ((issues++))
+        fi
+    done
+
+    return $issues
+}
+
+check_dns_resolution() {
+    log "=== Checking DNS Resolution ==="
+    local issues=0
+
+    local test_domains=("google.com" "matrix.org" "$MATRIX_FEDERATION_TEST")
+
+    for domain in "${test_domains[@]}"; do
+        if nslookup "$domain" >/dev/null 2>&1; then
+            log "✓ DNS resolution for $domain: OK"
+        else
+            log "✗ DNS resolution for $domain: FAILED"
+            ((issues++))
+        fi
+    done
+
+    return $issues
+}
+
+check_listening_ports() {
+    log "=== Checking Listening Ports ==="
+    local issues=0
+
+    local required_ports=(
+        "80:HTTP"
+        "443:HTTPS"
+        "8008:Matrix"
+        "8448:Federation"
+        "{{ ssh_port | default('2222') }}:SSH"
+        "5432:PostgreSQL"
+        "6379:Redis"
+    )
+
+    for port_info in "${required_ports[@]}"; do
+        local port="${port_info%%:*}"
+        local service="${port_info##*:}"
+
+        if netstat -tuln 2>/dev/null | grep -q ":$port "; then
+            log "✓ Port $port ($service): Listening"
+        else
+            log "✗ Port $port ($service): NOT listening"
+            ((issues++))
+        fi
+    done
+
+    return $issues
+}
+
+check_matrix_federation() {
+    log "=== Checking Matrix Federation ==="
+    local issues=0
+
+    if command -v curl >/dev/null 2>&1; then
+        # Test Matrix federation endpoint
+        local federation_response
+        federation_response=$(curl -s -o /dev/null -w "%{http_code}" "https://$MATRIX_FEDERATION_TEST/_matrix/federation/v1/version" 2>/dev/null || echo "000")
+
+        if [ "$federation_response" = "200" ]; then
+            log "✓ Matrix federation endpoint: Responding (HTTP $federation_response)"
+        else
+            log "✗ Matrix federation endpoint: Not responding (HTTP $federation_response)"
+            ((issues++))
+        fi
+
+        # Test Matrix client endpoint
+        local client_response
+        client_response=$(curl -s -o /dev/null -w "%{http_code}" "https://$MATRIX_FEDERATION_TEST/_matrix/client/versions" 2>/dev/null || echo "000")
+
+        if [ "$client_response" = "200" ]; then
+            log "✓ Matrix client endpoint: Responding (HTTP $client_response)"
+        else
+            log "✗ Matrix client endpoint: Not responding (HTTP $client_response)"
+            ((issues++))
+        fi
+    else
+        log "! curl not available - skipping Matrix endpoint checks"
+    fi
+
+    return $issues
+}
+
+check_firewall_status() {
+    log "=== Checking Firewall Status ==="
+    local issues=0
+
+    if command -v ufw >/dev/null 2>&1; then
+        if ufw status | grep -q "Status: active"; then
+            log "✓ UFW firewall: Active"
+
+            # Check critical rules
+            local http_allowed
+            local https_allowed
+            local ssh_allowed
+
+            http_allowed=$(ufw status | grep -c "80/tcp" || echo "0")
+            https_allowed=$(ufw status | grep -c "443/tcp" || echo "0")
+            ssh_allowed=$(ufw status | grep -c "{{ ssh_port | default('2222') }}/tcp" || echo "0")
+
+            if [ "$http_allowed" -gt 0 ]; then
+                log "✓ HTTP port allowed in firewall"
+            else
+                log "✗ HTTP port not allowed in firewall"
+                ((issues++))
+            fi
+
+            if [ "$https_allowed" -gt 0 ]; then
+                log "✓ HTTPS port allowed in firewall"
+            else
+                log "✗ HTTPS port not allowed in firewall"
+                ((issues++))
+            fi
+
+            if [ "$ssh_allowed" -gt 0 ]; then
+                log "✓ SSH port allowed in firewall"
+            else
+                log "✗ SSH port not allowed in firewall"
+                ((issues++))
+            fi
+        else
+            log "✗ UFW firewall: Inactive"
+            ((issues++))
+        fi
+    else
+        log "! UFW not available - cannot check firewall status"
+    fi
+
+    return $issues
+}
+
+check_network_performance() {
+    log "=== Checking Network Performance ==="
+    local issues=0
+
+    # Check network interface statistics
+    if [ -f /proc/net/dev ]; then
+        log "Network interface statistics:"
+        while IFS= read -r line; do
+            if [[ $line =~ ^[[:space:]]*[a-z] ]]; then
+                local interface=$(echo "$line" | awk '{print $1}' | sed 's/:$//')
+                local rx_errors=$(echo "$line" | awk '{print $4}')
+                local tx_errors=$(echo "$line" | awk '{print $12}')
+
+                if [ "$rx_errors" -gt 0 ] || [ "$tx_errors" -gt 0 ]; then
+                    log "! $interface: RX errors=$rx_errors, TX errors=$tx_errors"
+                    ((issues++))
+                fi
+            fi
+        done < /proc/net/dev
+    fi
+
+    # Check for high connection counts
+    local connection_count
+    connection_count=$(netstat -an 2>/dev/null | grep ESTABLISHED | wc -l)
+    log "Active connections: $connection_count"
+
+    if [ "$connection_count" -gt 1000 ]; then
+        log "WARNING: High number of active connections ($connection_count)"
+        ((issues++))
+    fi
+
+    return $issues
+}
+
+check_suspicious_activity() {
+    log "=== Checking for Suspicious Network Activity ==="
+    local issues=0
+
+    # Check for unusual listening ports
+    local unusual_ports
+    unusual_ports=$(netstat -tuln 2>/dev/null | grep LISTEN | grep -E ":(1234|3389|4444|5555|6666|7777|8888|9999)" | wc -l)
+
+    if [ "$unusual_ports" -gt 0 ]; then
+        log "WARNING: $unusual_ports suspicious listening ports detected"
+        netstat -tuln | grep LISTEN | grep -E ":(1234|3389|4444|5555|6666|7777|8888|9999)" | tee -a "$LOG_FILE"
+        ((issues++))
+    fi
+
+    # Check recent connections to unusual ports
+    if [ -f /var/log/auth.log ]; then
+        local unusual_connections
+        unusual_connections=$(grep "$(date '+%b %d')" /var/log/auth.log 2>/dev/null | grep -c "Connection.*refused" || echo "0")
+
+        if [ "$unusual_connections" -gt 10 ]; then
+            log "WARNING: $unusual_connections refused connections today"
+            ((issues++))
+        fi
+    fi
+
+    return $issues
+}
+
+main() {
+    log "=== Network Monitor Check Started ==="
+
+    local issues=0
+
+    check_network_interfaces || ((issues++))
+    check_external_connectivity || ((issues++))
+    check_dns_resolution || ((issues++))
+    check_listening_ports || ((issues++))
+    check_matrix_federation || ((issues++))
+    check_firewall_status || ((issues++))
+    check_network_performance || ((issues++))
+    check_suspicious_activity || ((issues++))
+
+    if [ $issues -gt 0 ]; then
+        log "=== Network Monitor: $issues issues found ==="
+        exit 1
+    else
+        log "=== Network Monitor: All checks passed ==="
+        exit 0
+    fi
+}
+
+main "$@"

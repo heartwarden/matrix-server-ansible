@@ -1,0 +1,206 @@
+#!/bin/bash
+# Disk monitoring script for Matrix server
+# Monitors disk usage, I/O, and filesystem health
+
+set -euo pipefail
+
+# Configuration
+LOG_FILE="/var/log/disk-monitor.log"
+ALERT_EMAIL="{{ monitoring_email | default('root@localhost') }}"
+
+# Thresholds
+DISK_WARNING_THRESHOLD=80
+DISK_CRITICAL_THRESHOLD=90
+INODE_WARNING_THRESHOLD=80
+INODE_CRITICAL_THRESHOLD=90
+
+log() {
+    echo "$(date '+%Y-%m-%d %H:%M:%S') - $1" | tee -a "$LOG_FILE"
+}
+
+check_disk_usage() {
+    log "=== Checking Disk Usage ==="
+    local issues=0
+
+    # Check all mounted filesystems
+    while IFS= read -r line; do
+        if [[ $line =~ ^/dev/ ]]; then
+            local filesystem=$(echo "$line" | awk '{print $1}')
+            local mountpoint=$(echo "$line" | awk '{print $6}')
+            local usage=$(echo "$line" | awk '{print $5}' | sed 's/%//')
+
+            if [ "$usage" -ge $DISK_CRITICAL_THRESHOLD ]; then
+                log "CRITICAL: $mountpoint ($filesystem) at ${usage}% usage"
+                ((issues++))
+            elif [ "$usage" -ge $DISK_WARNING_THRESHOLD ]; then
+                log "WARNING: $mountpoint ($filesystem) at ${usage}% usage"
+                ((issues++))
+            else
+                log "OK: $mountpoint ($filesystem) at ${usage}% usage"
+            fi
+        fi
+    done < <(df -h)
+
+    return $issues
+}
+
+check_inode_usage() {
+    log "=== Checking Inode Usage ==="
+    local issues=0
+
+    # Check inode usage
+    while IFS= read -r line; do
+        if [[ $line =~ ^/dev/ ]]; then
+            local filesystem=$(echo "$line" | awk '{print $1}')
+            local mountpoint=$(echo "$line" | awk '{print $6}')
+            local inode_usage=$(echo "$line" | awk '{print $5}' | sed 's/%//')
+
+            if [ "$inode_usage" -ge $INODE_CRITICAL_THRESHOLD ]; then
+                log "CRITICAL: $mountpoint ($filesystem) inodes at ${inode_usage}%"
+                ((issues++))
+            elif [ "$inode_usage" -ge $INODE_WARNING_THRESHOLD ]; then
+                log "WARNING: $mountpoint ($filesystem) inodes at ${inode_usage}%"
+                ((issues++))
+            else
+                log "OK: $mountpoint ($filesystem) inodes at ${inode_usage}%"
+            fi
+        fi
+    done < <(df -i)
+
+    return $issues
+}
+
+check_matrix_storage() {
+    log "=== Checking Matrix Storage ==="
+    local issues=0
+
+    # Check Matrix media store
+    if [ -d "/var/lib/matrix-synapse" ]; then
+        local matrix_size
+        matrix_size=$(du -sh /var/lib/matrix-synapse 2>/dev/null | awk '{print $1}' || echo "unknown")
+        log "Matrix data size: $matrix_size"
+
+        # Check for large media files
+        local large_files
+        large_files=$(find /var/lib/matrix-synapse -type f -size +100M 2>/dev/null | wc -l)
+        if [ "$large_files" -gt 0 ]; then
+            log "Found $large_files large files (>100MB) in Matrix storage"
+        fi
+    else
+        log "Matrix data directory not found"
+    fi
+
+    # Check PostgreSQL size
+    if command -v sudo >/dev/null 2>&1; then
+        local db_size
+        db_size=$(sudo -u postgres psql -c "SELECT pg_size_pretty(pg_database_size('synapse'));" 2>/dev/null | sed -n '3p' | xargs || echo "unknown")
+        log "PostgreSQL database size: $db_size"
+    fi
+
+    return $issues
+}
+
+check_log_sizes() {
+    log "=== Checking Log File Sizes ==="
+    local issues=0
+
+    local log_dirs=("/var/log" "/var/log/matrix-synapse" "/var/log/caddy")
+
+    for log_dir in "${log_dirs[@]}"; do
+        if [ -d "$log_dir" ]; then
+            # Find large log files (>100MB)
+            while IFS= read -r large_log; do
+                if [ -n "$large_log" ]; then
+                    local size=$(ls -lh "$large_log" | awk '{print $5}')
+                    log "Large log file: $large_log ($size)"
+                    ((issues++))
+                fi
+            done < <(find "$log_dir" -name "*.log" -size +100M 2>/dev/null)
+        fi
+    done
+
+    return $issues
+}
+
+check_disk_health() {
+    log "=== Checking Disk Health ==="
+    local issues=0
+
+    # Check for read-only filesystems
+    while IFS= read -r line; do
+        if [[ $line =~ ro, ]]; then
+            local mountpoint=$(echo "$line" | awk '{print $3}')
+            log "WARNING: $mountpoint is mounted read-only"
+            ((issues++))
+        fi
+    done < <(mount | grep "^/dev/")
+
+    # Check I/O statistics if available
+    if command -v iostat >/dev/null 2>&1; then
+        local high_io
+        high_io=$(iostat -x 1 1 2>/dev/null | awk 'NR>3 && $10>90 {print $1":"$10}' | head -5)
+        if [ -n "$high_io" ]; then
+            log "High I/O utilization detected:"
+            echo "$high_io" | while read -r device_io; do
+                log "  $device_io"
+            done
+            ((issues++))
+        fi
+    fi
+
+    return $issues
+}
+
+cleanup_suggestions() {
+    log "=== Cleanup Suggestions ==="
+
+    # Old log files
+    local old_logs
+    old_logs=$(find /var/log -name "*.log" -mtime +30 2>/dev/null | wc -l)
+    if [ "$old_logs" -gt 0 ]; then
+        log "Found $old_logs log files older than 30 days"
+        log "Consider: find /var/log -name '*.log' -mtime +30 -delete"
+    fi
+
+    # Package cache
+    if command -v apt >/dev/null 2>&1; then
+        local cache_size
+        cache_size=$(du -sh /var/cache/apt/archives 2>/dev/null | awk '{print $1}' || echo "unknown")
+        log "APT cache size: $cache_size"
+        log "Consider: apt-get clean"
+    fi
+
+    # Matrix media cleanup suggestions
+    if [ -d "/var/lib/matrix-synapse" ]; then
+        local old_media
+        old_media=$(find /var/lib/matrix-synapse -name "*.log*" -mtime +7 2>/dev/null | wc -l)
+        if [ "$old_media" -gt 0 ]; then
+            log "Found $old_media old Matrix log files"
+        fi
+    fi
+}
+
+main() {
+    log "=== Disk Monitor Check Started ==="
+
+    local issues=0
+
+    check_disk_usage || ((issues++))
+    check_inode_usage || ((issues++))
+    check_matrix_storage || ((issues++))
+    check_log_sizes || ((issues++))
+    check_disk_health || ((issues++))
+
+    # Always show cleanup suggestions
+    cleanup_suggestions
+
+    if [ $issues -gt 0 ]; then
+        log "=== Disk Monitor: $issues issues found ==="
+        exit 1
+    else
+        log "=== Disk Monitor: All checks passed ==="
+        exit 0
+    fi
+}
+
+main "$@"

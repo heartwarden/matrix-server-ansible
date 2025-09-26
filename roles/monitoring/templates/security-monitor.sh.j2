@@ -1,0 +1,119 @@
+#!/bin/bash
+# Security monitoring script for Matrix server
+# Monitors security events and potential threats
+
+set -euo pipefail
+
+# Configuration
+LOG_FILE="/var/log/security-monitor.log"
+ALERT_EMAIL="{{ monitoring_email | default('root@localhost') }}"
+SSH_LOG="/var/log/auth.log"
+FAIL2BAN_LOG="/var/log/fail2ban.log"
+MATRIX_LOG="/var/log/matrix-synapse/homeserver.log"
+
+# Thresholds
+MAX_FAILED_SSH=10
+MAX_FAILED_MATRIX=20
+TIMEFRAME="1 hour"
+
+log() {
+    echo "$(date '+%Y-%m-%d %H:%M:%S') - $1" | tee -a "$LOG_FILE"
+}
+
+check_ssh_attacks() {
+    local failed_attempts
+    failed_attempts=$(grep "Failed password" "$SSH_LOG" 2>/dev/null | grep "$(date '+%b %d')" | wc -l)
+
+    if [ "$failed_attempts" -gt $MAX_FAILED_SSH ]; then
+        log "WARNING: $failed_attempts failed SSH attempts today (threshold: $MAX_FAILED_SSH)"
+        return 1
+    fi
+
+    log "SSH attempts: $failed_attempts (OK)"
+    return 0
+}
+
+check_matrix_security() {
+    local matrix_errors
+    if [ -f "$MATRIX_LOG" ]; then
+        matrix_errors=$(grep -i "error\|failed\|unauthorized" "$MATRIX_LOG" 2>/dev/null | grep "$(date '+%Y-%m-%d')" | wc -l)
+
+        if [ "$matrix_errors" -gt $MAX_FAILED_MATRIX ]; then
+            log "WARNING: $matrix_errors Matrix errors today (threshold: $MAX_FAILED_MATRIX)"
+            return 1
+        fi
+
+        log "Matrix errors: $matrix_errors (OK)"
+    else
+        log "Matrix log not found - skipping Matrix security check"
+    fi
+    return 0
+}
+
+check_fail2ban_status() {
+    if command -v fail2ban-client >/dev/null 2>&1; then
+        local banned_ips
+        banned_ips=$(fail2ban-client status sshd 2>/dev/null | grep "Currently banned" | awk '{print $NF}' || echo "0")
+        log "Fail2ban banned IPs: $banned_ips"
+
+        if [ "$banned_ips" -gt 5 ]; then
+            log "WARNING: High number of banned IPs ($banned_ips)"
+            return 1
+        fi
+    else
+        log "fail2ban not available - skipping ban check"
+    fi
+    return 0
+}
+
+check_unusual_processes() {
+    # Check for unusual network connections
+    local suspicious_connections
+    suspicious_connections=$(netstat -tulpn 2>/dev/null | grep -E ":(1234|4444|5555|6666|7777|8888|9999)" | wc -l)
+
+    if [ "$suspicious_connections" -gt 0 ]; then
+        log "WARNING: Suspicious network connections detected"
+        netstat -tulpn | grep -E ":(1234|4444|5555|6666|7777|8888|9999)" | tee -a "$LOG_FILE"
+        return 1
+    fi
+
+    log "Network connections: Normal"
+    return 0
+}
+
+check_disk_space() {
+    local disk_usage
+    disk_usage=$(df / | awk 'NR==2 {print $(NF-1)}' | sed 's/%//')
+
+    if [ "$disk_usage" -gt 90 ]; then
+        log "WARNING: Disk usage at ${disk_usage}%"
+        return 1
+    elif [ "$disk_usage" -gt 80 ]; then
+        log "NOTICE: Disk usage at ${disk_usage}%"
+    else
+        log "Disk usage: ${disk_usage}% (OK)"
+    fi
+    return 0
+}
+
+main() {
+    log "=== Security Monitor Check Started ==="
+
+    local issues=0
+
+    check_ssh_attacks || ((issues++))
+    check_matrix_security || ((issues++))
+    check_fail2ban_status || ((issues++))
+    check_unusual_processes || ((issues++))
+    check_disk_space || ((issues++))
+
+    if [ $issues -gt 0 ]; then
+        log "=== Security Monitor: $issues issues found ==="
+        exit 1
+    else
+        log "=== Security Monitor: All checks passed ==="
+        exit 0
+    fi
+}
+
+main "$@"

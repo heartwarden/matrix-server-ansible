@@ -1,0 +1,35 @@
+#!/bin/bash
+# Matrix server restart script for {{ admin_username }}
+
+case "${1:-synapse}" in
+    "synapse"|"matrix")
+        echo "Restarting Matrix Synapse..."
+        sudo systemctl restart matrix-synapse
+        sudo systemctl status matrix-synapse --no-pager -l
+        ;;
+    "caddy"|"web")
+        echo "Restarting Caddy Web Server..."
+        sudo systemctl restart caddy
+        sudo systemctl status caddy --no-pager -l
+        ;;
+    "postgres"|"db")
+        echo "Restarting PostgreSQL..."
+        sudo systemctl restart postgresql
+        sudo systemctl status postgresql --no-pager -l
+        ;;
+    "redis")
+        echo "Restarting Redis..."
+        sudo systemctl restart redis-server
+        sudo systemctl status redis-server --no-pager -l
+        ;;
+    "all")
+        echo "Restarting all Matrix services..."
+        sudo systemctl restart matrix-synapse caddy postgresql redis-server
+        echo "Status check:"
+        sudo systemctl status matrix-synapse caddy postgresql redis-server --no-pager -l
+        ;;
+    *)
+        echo "Usage: matrix-restart [synapse|caddy|postgres|redis|all]"
+        echo "Default: synapse"
+        ;;
+esac

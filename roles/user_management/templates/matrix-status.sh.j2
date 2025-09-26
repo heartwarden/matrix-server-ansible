@@ -1,0 +1,36 @@
+#!/bin/bash
+# Matrix server status script for {{ admin_username }}
+
+echo "=== Matrix Server Status ==="
+echo
+
+echo "Matrix Synapse:"
+sudo systemctl status matrix-synapse --no-pager -l
+
+echo
+echo "Caddy Web Server:"
+sudo systemctl status caddy --no-pager -l
+
+echo
+echo "PostgreSQL Database:"
+sudo systemctl status postgresql --no-pager -l
+
+echo
+echo "Redis Cache:"
+sudo systemctl status redis-server --no-pager -l
+
+echo
+echo "=== Port Status ==="
+sudo netstat -tulpn | grep -E ':(8008|8448|443|80|5432|6379|{{ ssh_port | default(2222) }})\s'
+
+echo
+echo "=== Disk Usage ==="
+df -h | grep -E '^/dev/'
+
+echo
+echo "=== Memory Usage ==="
+free -h
+
+echo
+echo "=== System Load ==="
+uptime

@@ -1,0 +1,22 @@
+# Sudoers configuration for {{ admin_username }}
+{{ admin_username }} ALL=(ALL) {% if sudo_nopasswd %}NOPASSWD:{% endif %}ALL
+
+# Allow {{ admin_username }} to run specific commands without password
+{{ admin_username }} ALL=(ALL) NOPASSWD: /bin/systemctl status *
+{{ admin_username }} ALL=(ALL) NOPASSWD: /bin/systemctl restart matrix-synapse
+{{ admin_username }} ALL=(ALL) NOPASSWD: /bin/systemctl restart caddy
+{{ admin_username }} ALL=(ALL) NOPASSWD: /bin/journalctl *
+{{ admin_username }} ALL=(ALL) NOPASSWD: /usr/local/bin/create-matrix-admin.sh
+
+# Security settings
+Defaults:{{ admin_username }} timestamp_timeout={{ sudo_timeout }}
+Defaults:{{ admin_username }} !visiblepw
+Defaults:{{ admin_username }} always_set_home
+Defaults:{{ admin_username }} match_group_by_gid
+Defaults:{{ admin_username }} always_query_group_plugin
+Defaults:{{ admin_username }} env_reset
+Defaults:{{ admin_username }} env_keep="COLORS DISPLAY HOSTNAME HISTSIZE KDEDIR LS_COLORS"
+Defaults:{{ admin_username }} env_keep+="MAIL PS1 PS2 QTDIR USERNAME LANG LC_ADDRESS LC_CTYPE"
+Defaults:{{ admin_username }} env_keep+="LC_COLLATE LC_IDENTIFICATION LC_MEASUREMENT LC_MESSAGES"
+Defaults:{{ admin_username }} env_keep+="LC_MONETARY LC_NAME LC_NUMERIC LC_PAPER LC_TELEPHONE"
+Defaults:{{ admin_username }} env_keep+="LC_TIME LC_ALL LANGUAGE LINGUAS _XKB_CHARSET XAUTHORITY"

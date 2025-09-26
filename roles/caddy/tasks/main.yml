@@ -50,10 +50,8 @@
   notify: restart caddy
 
 - name: Set capabilities for Caddy to bind to privileged ports
-  capabilities:
-    path: "{{ caddy_binary_path }}"
-    capability: cap_net_bind_service+ep
-    state: present
+  command: setcap cap_net_bind_service=+ep {{ caddy_binary_path }}
+  changed_when: false
 
 - name: Create Caddyfile
   template:
@@ -108,15 +106,13 @@
     state: started
     daemon_reload: yes
 
-- name: Configure firewall for HTTP/HTTPS
-  ufw:
-    rule: allow
-    port: "{{ item }}"
-    proto: tcp
-    comment: "HTTP/HTTPS for Caddy"
+- name: Configure firewall for HTTP/HTTPS and Matrix federation
+  command: "ufw allow {{ item }}/tcp comment '{{ item == '8448' and 'Matrix federation' or 'HTTP/HTTPS for Caddy' }}'"
   loop:
     - "80"
     - "443"
+    - "8448"
+  ignore_errors: yes
 
 - name: Verify Caddy is running
   command: "{{ caddy_binary_path }} version"

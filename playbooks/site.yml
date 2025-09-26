@@ -45,6 +45,7 @@
         ssl_domains:
           - "{{ matrix_domain }}"
           - "{{ matrix_homeserver_name }}"
+      when: manual_ssl_enabled | default(false)
       tags: ['ssl', 'certificates']
 
     - role: monitoring

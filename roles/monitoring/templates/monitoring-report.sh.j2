@@ -10,7 +10,7 @@ REPORT_EMAIL="{{ monitoring_email | default('root@localhost') }}"
 REPORT_FILE="/tmp/monitoring-report-$(date +%Y%m%d).txt"
 
 generate_report() {
-    cat > "$REPORT_FILE" << EOF
+    cat > "$REPORT_FILE" << 'REPORT_EOF'
 Matrix Server Daily Monitoring Report
 =====================================
 
@@ -37,15 +37,19 @@ Matrix Synapse: $(systemctl is-active matrix-synapse || echo "STOPPED")
 Caddy Web Server: $(systemctl is-active caddy || echo "STOPPED")
 PostgreSQL: $(systemctl is-active postgresql || echo "STOPPED")
 Redis: $(systemctl is-active redis-server || echo "STOPPED")
+REPORT_EOF
+
 {% if fail2ban_enabled | default(true) %}
-Fail2ban: $(systemctl is-active fail2ban || echo "STOPPED")
+    echo "Fail2ban: \$(systemctl is-active fail2ban || echo \"STOPPED\")" >> "$REPORT_FILE"
 {% endif %}
+
+    cat >> "$REPORT_FILE" << 'REPORT_EOF2'
 SSH: $(systemctl is-active ssh || echo "STOPPED")
 
 MATRIX SERVER STATUS
 ====================
 
-EOF
+REPORT_EOF2
 
     # Matrix API check
     if command -v curl >/dev/null 2>&1; then

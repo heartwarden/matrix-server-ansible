@@ -378,8 +378,22 @@ vault_webhook_secret: "$(openssl rand -base64 32)"
 EOF
 )
 
+    # Create temporary unencrypted vault file
+    local temp_vault_file="$vault_file.tmp"
+    echo "$vault_content" > "$temp_vault_file"
+
     # Encrypt vault file
-    echo "$vault_content" | ansible-vault encrypt --vault-password-file="$vault_pass_file" --output="$vault_file"
+    ansible-vault encrypt "$temp_vault_file" --vault-password-file="$vault_pass_file" --output="$vault_file" 2>/dev/null || \
+    ansible-vault encrypt "$temp_vault_file" --vault-password-file="$vault_pass_file" --encrypt-vault-id=default --output="$vault_file" 2>/dev/null || \
+    {
+        # Fallback: create vault file directly
+        echo "$vault_content" > "$vault_file"
+        ansible-vault encrypt "$vault_file" --vault-password-file="$vault_pass_file" 2>/dev/null || \
+        ansible-vault encrypt "$vault_file" --vault-password-file="$vault_pass_file" --encrypt-vault-id=default
+    }
+
+    # Clean up temporary file
+    rm -f "$temp_vault_file"
 
     success "Encrypted vault created: $vault_file"
     success "Vault password saved to: $vault_pass_file"

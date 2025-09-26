@@ -180,7 +180,8 @@ install_ansible() {
 
     # Install Ansible
     info "Installing Ansible $ANSIBLE_VERSION..."
-    pip install "ansible$ANSIBLE_VERSION"
+    pip install "ansible-core$ANSIBLE_VERSION"
+    pip install ansible
 
     # Install additional Python packages
     pip install jmespath  # Required for JSON queries in Ansible

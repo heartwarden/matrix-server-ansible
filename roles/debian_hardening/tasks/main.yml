@@ -92,12 +92,20 @@
     - { regexp: '^PASS_MIN_DAYS', line: 'PASS_MIN_DAYS {{ password_min_age }}' }
     - { regexp: '^PASS_WARN_AGE', line: 'PASS_WARN_AGE {{ password_warn_age }}' }
 
-- name: Disable unused services
+- name: Check if services are available
+  shell: "systemctl list-unit-files {{ item }}.service 2>/dev/null | grep -q {{ item }}.service"
+  register: service_check
+  loop: "{{ disable_services }}"
+  failed_when: false
+  changed_when: false
+
+- name: Disable unused services that exist
   systemd:
-    name: "{{ item }}"
+    name: "{{ item.item }}"
     enabled: no
     state: stopped
-  loop: "{{ disable_services }}"
+  loop: "{{ service_check.results }}"
+  when: item.rc == 0
   ignore_errors: yes
 
 - name: Configure auditd

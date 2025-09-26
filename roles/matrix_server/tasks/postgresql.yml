@@ -1,0 +1,111 @@
+---
+- name: Install PostgreSQL packages
+  apt:
+    name:
+      - postgresql
+      - postgresql-contrib
+      - python3-psycopg2
+    state: present
+    update_cache: yes
+
+- name: Start and enable PostgreSQL service
+  systemd:
+    name: postgresql
+    state: started
+    enabled: yes
+
+- name: Create Matrix database user
+  become_user: postgres
+  postgresql_user:
+    name: "{{ matrix_database_user }}"
+    password: "{{ matrix_database_password }}"
+    encrypted: yes
+    state: present
+  vars:
+    ansible_ssh_pipelining: true
+
+- name: Create Matrix database
+  become_user: postgres
+  postgresql_db:
+    name: "{{ matrix_database_name }}"
+    owner: "{{ matrix_database_user }}"
+    encoding: 'UTF-8'
+    lc_collate: 'C'
+    lc_ctype: 'C'
+    template: 'template0'
+    state: present
+  vars:
+    ansible_ssh_pipelining: true
+
+- name: Configure PostgreSQL authentication
+  lineinfile:
+    path: /etc/postgresql/{{ postgresql_version }}/main/pg_hba.conf
+    regexp: '^local\s+{{ matrix_database_name }}\s+{{ matrix_database_user }}'
+    line: 'local {{ matrix_database_name }} {{ matrix_database_user }} md5'
+    insertafter: '^# Database administrative login'
+  notify: restart postgresql
+  vars:
+    postgresql_version: "{{ ansible_facts['postgresql_version'] | default('15') }}"
+
+- name: Configure PostgreSQL to listen on localhost
+  lineinfile:
+    path: /etc/postgresql/{{ postgresql_version }}/main/postgresql.conf
+    regexp: "^#?listen_addresses = "
+    line: "listen_addresses = 'localhost'"
+  notify: restart postgresql
+  vars:
+    postgresql_version: "{{ ansible_facts['postgresql_version'] | default('15') }}"
+
+- name: Set PostgreSQL shared_preload_libraries
+  lineinfile:
+    path: /etc/postgresql/{{ postgresql_version }}/main/postgresql.conf
+    regexp: "^#?shared_preload_libraries = "
+    line: "shared_preload_libraries = 'pg_stat_statements'"
+  notify: restart postgresql
+  vars:
+    postgresql_version: "{{ ansible_facts['postgresql_version'] | default('15') }}"
+
+- name: Set PostgreSQL max_connections
+  lineinfile:
+    path: /etc/postgresql/{{ postgresql_version }}/main/postgresql.conf
+    regexp: "^#?max_connections = "
+    line: "max_connections = {{ postgresql_max_connections | default('200') }}"
+  notify: restart postgresql
+  vars:
+    postgresql_version: "{{ ansible_facts['postgresql_version'] | default('15') }}"
+
+- name: Set PostgreSQL shared_buffers
+  lineinfile:
+    path: /etc/postgresql/{{ postgresql_version }}/main/postgresql.conf
+    regexp: "^#?shared_buffers = "
+    line: "shared_buffers = {{ postgresql_shared_buffers | default('256MB') }}"
+  notify: restart postgresql
+  vars:
+    postgresql_version: "{{ ansible_facts['postgresql_version'] | default('15') }}"
+
+- name: Restart PostgreSQL to apply configuration changes
+  systemd:
+    name: postgresql
+    state: restarted
+  when: postgresql_config_changed | default(false)
+
+- name: Verify PostgreSQL is running
+  command: systemctl is-active postgresql
+  register: postgresql_status
+  changed_when: false
+
+- name: Test database connection
+  become_user: postgres
+  command: psql -d {{ matrix_database_name }} -c "SELECT 1;"
+  register: db_test
+  changed_when: false
+  vars:
+    ansible_ssh_pipelining: true
+
+- name: Display PostgreSQL status
+  debug:
+    msg:
+      - "PostgreSQL Status: {{ postgresql_status.stdout }}"
+      - "Database Connection: {{ 'OK' if db_test.rc == 0 else 'Failed' }}"
+      - "Database: {{ matrix_database_name }}"
+      - "User: {{ matrix_database_user }}"

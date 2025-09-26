@@ -15,17 +15,6 @@
 {% endfor %}
     header Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
 
-    # Rate limiting
-{% if caddy_rate_limit_enabled %}
-    rate_limit {
-        zone matrix {
-            key {remote_host}
-            events {{ caddy_rate_limit_requests }}
-            window {{ caddy_rate_limit_window }}
-        }
-    }
-{% endif %}
-
     # Matrix Client API
     handle /_matrix/* {
         reverse_proxy 127.0.0.1:8008 {

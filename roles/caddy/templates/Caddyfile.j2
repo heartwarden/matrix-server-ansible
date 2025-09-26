@@ -4,7 +4,7 @@
     admin off
 
     # ACME configuration
-    email {{ caddy_acme_email }}
+    email {{ monitoring_email | default('admin@' + inventory_hostname) }}
 
     # Security
     servers {
@@ -75,8 +75,8 @@
     }
 
     # Health check
-{% if caddy_health_check_enabled %}
-    handle {{ caddy_health_check_path }} {
+{% if caddy_health_check_enabled | default(true) %}
+    handle /health {
         respond "Matrix server healthy" 200 {
             header Content-Type "text/plain"
         }
@@ -104,7 +104,8 @@
 }
 
 # Element web client
-{{ matrix_domain }}{% if element_subdomain %}.{{ element_subdomain }}{% endif %} {
+{% if matrix_element_enabled | default(true) %}
+chat.{{ matrix_homeserver_name }} {
     # Security headers for Element
     header X-Frame-Options "SAMEORIGIN"
     header X-Content-Type-Options "nosniff"
@@ -140,8 +141,8 @@
     }
 
     # Health check
-{% if caddy_health_check_enabled %}
-    handle {{ caddy_health_check_path }} {
+{% if caddy_health_check_enabled | default(true) %}
+    handle /health {
         respond "Element web healthy" 200 {
             header Content-Type "text/plain"
         }
@@ -166,6 +167,7 @@
         level {{ caddy_log_level }}
     }
 }
+{% endif %}
 
 # Redirect matrix.domain.com port 8448 for federation
 {{ matrix_homeserver_name }}:8448 {

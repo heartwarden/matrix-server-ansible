@@ -43,6 +43,10 @@ apt-get install -y python3 python3-pip python3-venv whiptail openssl openssh-cli
 log "Installing Ansible..."
 pip3 install --break-system-packages ansible-core==2.15.8
 
+# Install required Ansible collections
+log "Installing required Ansible collections..."
+ansible-galaxy collection install ansible.posix community.crypto --force
+
 # Set working directory
 cd "$SCRIPT_DIR"
 

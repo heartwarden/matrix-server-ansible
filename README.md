@@ -33,6 +33,9 @@ If you prefer manual control:
 apt-get update
 apt-get install -y python3 python3-pip whiptail openssl git
 pip3 install --break-system-packages ansible-core==2.15.8
+
+# Install required Ansible collections
+ansible-galaxy collection install ansible.posix community.crypto --force
 ```
 
 #### 2. Configure Your Server

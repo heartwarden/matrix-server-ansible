@@ -60,14 +60,19 @@
   with_fileglob:
     - /etc/ssh/ssh_host_*_key.pub
 
-- name: Configure kernel hardening parameters
-  sysctl:
-    name: "{{ item.key }}"
-    value: "{{ item.value }}"
-    state: present
-    reload: yes
-    sysctl_file: /etc/sysctl.d/99-security.conf
-  with_dict: "{{ kernel_hardening }}"
+- name: Create sysctl security configuration file
+  template:
+    src: sysctl-security.conf.j2
+    dest: /etc/sysctl.d/99-security.conf
+    owner: root
+    group: root
+    mode: '0644'
+  notify: reload sysctl
+
+- name: Apply sysctl settings immediately
+  command: sysctl -p /etc/sysctl.d/99-security.conf
+  changed_when: false
+  ignore_errors: yes
 
 - name: Set secure file permissions
   file:

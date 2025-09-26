@@ -150,16 +150,24 @@
     creates: /var/lib/aide/aide.db
 
 - name: Create daily AIDE check cron job
-  cron:
-    name: "AIDE integrity check"
-    minute: "0"
-    hour: "5"
-    job: "/usr/bin/aide --check"
-    user: root
+  lineinfile:
+    path: /etc/crontab
+    line: "0 5 * * * root /usr/bin/aide --check >/dev/null 2>&1"
+    regexp: ".*aide --check.*"
+    state: present
 
 - name: Set timezone
-  timezone:
-    name: "{{ timezone | default('UTC') }}"
+  command: timedatectl set-timezone "{{ timezone | default('UTC') }}"
+  changed_when: false
+
+- name: Verify timezone setting
+  command: timedatectl show --property=Timezone --value
+  register: current_timezone
+  changed_when: false
+
+- name: Display timezone information
+  debug:
+    msg: "Timezone set to: {{ current_timezone.stdout }}"
 
 - name: Configure NTP
   template:
@@ -170,13 +178,24 @@
     mode: '0644'
   notify: restart systemd-timesyncd
 
-- name: Secure shared memory
-  mount:
-    path: /dev/shm
-    src: tmpfs
-    fstype: tmpfs
-    opts: defaults,noexec,nosuid,nodev
-    state: mounted
+- name: Check if /dev/shm mount needs updating
+  shell: mount | grep '/dev/shm' | grep -v 'noexec\|nosuid\|nodev'
+  register: shm_mount_check
+  failed_when: false
+  changed_when: false
+
+- name: Add secure /dev/shm mount to fstab
+  lineinfile:
+    path: /etc/fstab
+    line: "tmpfs /dev/shm tmpfs defaults,noexec,nosuid,nodev 0 0"
+    regexp: "^tmpfs\\s+/dev/shm"
+    state: present
+  when: shm_mount_check.rc == 0
+
+- name: Remount /dev/shm with secure options
+  command: mount -o remount,noexec,nosuid,nodev /dev/shm
+  when: shm_mount_check.rc == 0
+  ignore_errors: yes
 
 - name: Create security-related directories
   file:

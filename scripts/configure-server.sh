@@ -475,7 +475,8 @@ BANNER
 
     # Deploy
     log "Deploying Matrix server..."
-    ansible-playbook "$PROJECT_DIR/playbooks/site.yml" \
+    cd "$PROJECT_DIR"  # Ensure we're in the project directory
+    ansible-playbook "playbooks/site.yml" \
         -i "$INVENTORY" \
         --vault-password-file="$VAULT_PASS" \
         --extra-vars="@$CONFIG_FILE" \

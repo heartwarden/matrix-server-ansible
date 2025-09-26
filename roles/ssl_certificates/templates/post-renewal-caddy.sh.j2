@@ -1,0 +1,14 @@
+#!/bin/bash
+# Post-renewal hook for Caddy
+# This script is executed after Let's Encrypt certificate renewal
+
+set -e
+
+# Reload Caddy to use new certificates
+echo "Reloading Caddy after certificate renewal..."
+systemctl reload caddy
+
+# Log the renewal
+echo "$(date): SSL certificates renewed and Caddy reloaded" >> /var/log/ssl-renewal.log
+
+exit 0

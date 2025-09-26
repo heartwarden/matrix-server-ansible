@@ -1,19 +1,42 @@
 ---
-- name: Install certbot and dependencies
+- name: Install snapd for certbot
+  apt:
+    name: snapd
+    state: present
+    update_cache: yes
+
+- name: Install openssl
+  apt:
+    name: openssl
+    state: present
+
+- name: Remove system certbot if present (to avoid conflicts)
   apt:
     name:
       - certbot
       - python3-certbot-nginx
-      - openssl
-    state: present
-    update_cache: yes
+    state: absent
+  ignore_errors: yes
+
+- name: Install certbot via snap
+  command: snap install --classic certbot
+  register: snap_install_result
+  changed_when: "'certbot' not in snap_install_result.stderr"
+  failed_when: false
+
+- name: Create certbot symlink
+  file:
+    src: /snap/bin/certbot
+    dest: /usr/bin/certbot
+    state: link
+  ignore_errors: yes
 
 - name: Create webroot directory for Let's Encrypt
   file:
     path: "{{ letsencrypt_webroot_path }}"
     state: directory
-    owner: www-data
-    group: www-data
+    owner: caddy
+    group: caddy
     mode: '0755'
 
 - name: Create SSL directories
@@ -52,53 +75,30 @@
     group: root
     mode: '0644'
 
-- name: Create temporary nginx configuration for certificate validation
-  template:
-    src: nginx-letsencrypt-temp.conf.j2
-    dest: /etc/nginx/sites-available/letsencrypt-temp
-    owner: root
-    group: root
-    mode: '0644'
-  when: ssl_domains is defined and ssl_domains | length > 0
-
-- name: Enable temporary nginx configuration
-  file:
-    src: /etc/nginx/sites-available/letsencrypt-temp
-    dest: /etc/nginx/sites-enabled/letsencrypt-temp
-    state: link
-  when: ssl_domains is defined and ssl_domains | length > 0
-  notify: reload nginx
-
-- name: Test nginx configuration
-  command: nginx -t
-  when: ssl_domains is defined and ssl_domains | length > 0
-
-- name: Reload nginx to enable temporary configuration
+- name: Stop Caddy temporarily for standalone certificate generation
   systemd:
-    name: nginx
-    state: reloaded
+    name: caddy
+    state: stopped
   when: ssl_domains is defined and ssl_domains | length > 0
 
-- name: Generate Let's Encrypt certificates
+- name: Generate Let's Encrypt certificates using standalone method
   command: >
     certbot certonly
-    --webroot
-    --webroot-path {{ letsencrypt_webroot_path }}
+    --standalone
     --email {{ ssl_acme_email }}
     --agree-tos
     --non-interactive
-    {% if letsencrypt_staging %}--staging{% endif %}
+    {% if letsencrypt_staging | default(false) %}--staging{% endif %}
     {% for domain in ssl_domains %}-d {{ domain }} {% endfor %}
   register: certbot_result
   when: ssl_domains is defined and ssl_domains | length > 0
   changed_when: "'Congratulations' in certbot_result.stdout"
 
-- name: Remove temporary nginx configuration
-  file:
-    path: /etc/nginx/sites-enabled/letsencrypt-temp
-    state: absent
+- name: Start Caddy after certificate generation
+  systemd:
+    name: caddy
+    state: started
   when: ssl_domains is defined and ssl_domains | length > 0
-  notify: reload nginx
 
 - name: Create certificate renewal script
   template:
@@ -110,22 +110,12 @@
   when: ssl_renewal_enabled
 
 - name: Create certificate renewal cron job
-  cron:
-    name: "SSL certificate renewal"
-    minute: "{{ ssl_renewal_minute }}"
-    hour: "{{ ssl_renewal_hour }}"
-    job: "/usr/local/bin/ssl-renewal.sh"
-    user: root
-  when: ssl_renewal_enabled
-
-- name: Create SSL security configuration for nginx
-  template:
-    src: ssl-security.conf.j2
-    dest: /etc/nginx/snippets/ssl-security.conf
-    owner: root
-    group: root
-    mode: '0644'
-  notify: reload nginx
+  lineinfile:
+    path: /etc/crontab
+    line: "{{ ssl_renewal_minute | default('0') }} {{ ssl_renewal_hour | default('2') }} * * * root /usr/local/bin/ssl-renewal.sh >/dev/null 2>&1"
+    regexp: ".*/usr/local/bin/ssl-renewal.sh.*"
+    state: present
+  when: ssl_renewal_enabled | default(true)
 
 - name: Create certificate backup script
   template:
@@ -134,16 +124,15 @@
     owner: root
     group: root
     mode: '0755'
-  when: ssl_backup_enabled
+  when: ssl_backup_enabled | default(true)
 
 - name: Create certificate backup cron job
-  cron:
-    name: "SSL certificate backup"
-    minute: "15"
-    hour: "2"
-    job: "/usr/local/bin/ssl-backup.sh"
-    user: root
-  when: ssl_backup_enabled
+  lineinfile:
+    path: /etc/crontab
+    line: "15 2 * * * root /usr/local/bin/ssl-backup.sh >/dev/null 2>&1"
+    regexp: ".*/usr/local/bin/ssl-backup.sh.*"
+    state: present
+  when: ssl_backup_enabled | default(true)
 
 - name: Set up certificate monitoring
   template:
@@ -154,12 +143,11 @@
     mode: '0755'
 
 - name: Create certificate monitoring cron job
-  cron:
-    name: "SSL certificate monitoring"
-    minute: "0"
-    hour: "6"
-    job: "/usr/local/bin/ssl-monitor.sh"
-    user: root
+  lineinfile:
+    path: /etc/crontab
+    line: "0 6 * * * root /usr/local/bin/ssl-monitor.sh >/dev/null 2>&1"
+    regexp: ".*/usr/local/bin/ssl-monitor.sh.*"
+    state: present
 
 - name: Create post-renewal hook directory
   file:
@@ -169,10 +157,10 @@
     group: root
     mode: '0755'
 
-- name: Create post-renewal hook for nginx
+- name: Create post-renewal hook for Caddy
   template:
-    src: post-renewal-nginx.sh.j2
-    dest: /etc/letsencrypt/renewal-hooks/post/nginx
+    src: post-renewal-caddy.sh.j2
+    dest: /etc/letsencrypt/renewal-hooks/post/caddy
     owner: root
     group: root
     mode: '0755'

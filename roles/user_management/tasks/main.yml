@@ -32,16 +32,53 @@
     group: "{{ admin_username }}"
     mode: '0700'
 
-- name: Generate SSH key pair if not provided
-  openssh_keypair:
+- name: Check if SSH private key already exists
+  stat:
     path: "/home/{{ admin_username }}/.ssh/id_{{ ssh_key_type }}"
-    type: "{{ ssh_key_type }}"
-    size: "{{ ssh_key_bits if ssh_key_type == 'rsa' else omit }}"
+  register: ssh_private_key_check
+  when: ssh_public_key == ""
+
+- name: Generate SSH key pair if not provided
+  command: >
+    ssh-keygen -t {{ ssh_key_type }}
+    {% if ssh_key_type == 'rsa' %}-b {{ ssh_key_bits }}{% endif %}
+    -f "/home/{{ admin_username }}/.ssh/id_{{ ssh_key_type }}"
+    -N ""
+    -C "{{ admin_username }}@{{ inventory_hostname }}"
+  become_user: "{{ admin_username }}"
+  when:
+    - ssh_public_key == ""
+    - not ssh_private_key_check.stat.exists
+  register: ssh_keygen_result
+
+- name: Set ownership of generated SSH keys
+  file:
+    path: "{{ item }}"
     owner: "{{ admin_username }}"
     group: "{{ admin_username }}"
-    mode: '0600'
-  when: ssh_public_key == ""
-  register: generated_keypair
+    mode: "{{ '0600' if item.endswith('id_' + ssh_key_type) else '0644' }}"
+  loop:
+    - "/home/{{ admin_username }}/.ssh/id_{{ ssh_key_type }}"
+    - "/home/{{ admin_username }}/.ssh/id_{{ ssh_key_type }}.pub"
+  when:
+    - ssh_public_key == ""
+    - ssh_keygen_result is defined and ssh_keygen_result.changed
+
+- name: Read generated public key
+  slurp:
+    src: "/home/{{ admin_username }}/.ssh/id_{{ ssh_key_type }}.pub"
+  register: generated_public_key_content
+  when:
+    - ssh_public_key == ""
+    - ssh_keygen_result is defined and ssh_keygen_result.changed
+
+- name: Set generated public key fact
+  set_fact:
+    generated_keypair:
+      public_key: "{{ generated_public_key_content.content | b64decode | trim }}"
+  when:
+    - ssh_public_key == ""
+    - generated_public_key_content is defined
 
 - name: Set up authorized_keys with provided public key
   authorized_key:

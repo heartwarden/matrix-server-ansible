@@ -69,7 +69,7 @@ REPORT_EOF2
         echo "Storage Size: $storage_size" >> "$REPORT_FILE"
     fi
 
-    cat >> "$REPORT_FILE" << EOF
+    cat >> "$REPORT_FILE" << 'EOF'
 
 SECURITY SUMMARY
 ================
@@ -90,7 +90,7 @@ EOF
         echo "Firewall Status: $(ufw status | head -1)" >> "$REPORT_FILE"
     fi
 
-    cat >> "$REPORT_FILE" << EOF
+    cat >> "$REPORT_FILE" << 'EOF'
 
 NETWORK STATUS
 ==============
@@ -122,7 +122,7 @@ EOF
         grep -E "(ERROR|CRITICAL)" /var/log/matrix-synapse/homeserver.log 2>/dev/null | grep "$(date '+%Y-%m-%d')" | tail -10 >> "$REPORT_FILE" || echo "No Matrix errors found" >> "$REPORT_FILE"
     fi
 
-    cat >> "$REPORT_FILE" << EOF
+    cat >> "$REPORT_FILE" << 'EOF'
 
 DISK SPACE TRENDS
 =================
@@ -145,7 +145,7 @@ EOF
         iostat -x 1 1 2>/dev/null | tail -n +4 >> "$REPORT_FILE" || echo "I/O stats unavailable" >> "$REPORT_FILE"
     fi
 
-    cat >> "$REPORT_FILE" << EOF
+    cat >> "$REPORT_FILE" << 'EOF'
 
 RECOMMENDATIONS
 ===============
@@ -186,7 +186,7 @@ EOF
         printf '%s\n' "${recommendations[@]}" >> "$REPORT_FILE"
     fi
 
-    cat >> "$REPORT_FILE" << EOF
+    cat >> "$REPORT_FILE" << 'EOF'
 
 NEXT MONITORING CYCLE
 ====================

@@ -38,14 +38,24 @@ info() {
 # Generate secure random string
 generate_secret() {
     local length="${1:-32}"
-    openssl rand -base64 "$length" | tr -d "=+/" | cut -c1-"$length"
+    # Use openssl for cross-platform compatibility
+    openssl rand -base64 "$((length * 2))" | tr -d "=+/\n" | cut -c1-"$length"
 }
 
 # Generate password with special characters
 generate_password() {
     local length="${1:-24}"
-    # Generate a strong password with mixed case, numbers, and symbols
-    env LC_ALL=C tr -dc 'A-Za-z0-9!@#$%^&*()_+-=[]{}|;:,.<>?' < /dev/urandom | head -c "$length"
+    # Use openssl for better compatibility across systems
+    local chars="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
+    local password=""
+
+    # Generate base password with alphanumeric chars
+    for i in $(seq 1 "$length"); do
+        local rand_index=$(($(openssl rand -hex 1 | od -An -td1) % ${#chars}))
+        password="${password}${chars:$rand_index:1}"
+    done
+
+    echo "$password"
 }
 
 # Check if required tools are available
@@ -126,8 +136,24 @@ create_directories() {
 generate_all_secrets() {
     log "Generating secure secrets..."
 
+    # Test secret generation first
+    local test_secret
+    if ! test_secret=$(generate_secret 8); then
+        error "Failed to generate test secret"
+        exit 1
+    fi
+
+    if [ ${#test_secret} -ne 8 ]; then
+        error "Secret generation returned wrong length: ${#test_secret} instead of 8"
+        exit 1
+    fi
+
     # Matrix database
     MATRIX_DB_PASSWORD=$(generate_password 32)
+    if [ -z "$MATRIX_DB_PASSWORD" ]; then
+        error "Failed to generate database password"
+        exit 1
+    fi
 
     # Matrix application secrets
     FORM_SECRET=$(generate_secret 64)
@@ -136,6 +162,12 @@ generate_all_secrets() {
 
     # Coturn (TURN server)
     COTURN_SECRET=$(generate_secret 32)
+
+    # Validate all secrets were generated
+    if [ -z "$FORM_SECRET" ] || [ -z "$MACAROON_SECRET" ] || [ -z "$REGISTRATION_SECRET" ] || [ -z "$COTURN_SECRET" ]; then
+        error "Failed to generate one or more secrets"
+        exit 1
+    fi
 
     # Admin user (will be prompted)
     echo ""
@@ -212,12 +244,34 @@ EOF
 encrypt_vault_file() {
     log "Encrypting vault file with Ansible Vault..."
 
-    if ansible-vault encrypt "$VAULT_FILE.tmp" --output "$VAULT_FILE"; then
+    # Validate vault file content before encryption
+    if [ ! -f "$VAULT_FILE.tmp" ]; then
+        error "Vault file template not found: $VAULT_FILE.tmp"
+        exit 1
+    fi
+
+    # Check file size
+    local file_size=$(wc -c < "$VAULT_FILE.tmp")
+    if [ "$file_size" -lt 100 ]; then
+        error "Vault file seems too small ($file_size bytes). Content may be missing."
+        cat "$VAULT_FILE.tmp"
+        exit 1
+    fi
+
+    # Store vault password for this session
+    export ANSIBLE_VAULT_PASSWORD_FILE="/tmp/vault_pass_$$"
+    echo "$vault_password" > "$ANSIBLE_VAULT_PASSWORD_FILE"
+    chmod 600 "$ANSIBLE_VAULT_PASSWORD_FILE"
+
+    if ansible-vault encrypt "$VAULT_FILE.tmp" --output "$VAULT_FILE" --vault-password-file "$ANSIBLE_VAULT_PASSWORD_FILE"; then
         rm -f "$VAULT_FILE.tmp"
+        rm -f "$ANSIBLE_VAULT_PASSWORD_FILE"
         log "✓ Vault file encrypted successfully"
     else
         error "Failed to encrypt vault file"
+        cat "$VAULT_FILE.tmp"
         rm -f "$VAULT_FILE.tmp"
+        rm -f "$ANSIBLE_VAULT_PASSWORD_FILE"
         exit 1
     fi
 }
@@ -305,6 +359,27 @@ show_summary() {
     echo "  📝 Backup your vault password - you cannot recover secrets without it!"
 }
 
+# Debug function for troubleshooting
+debug_environment() {
+    if [ "${DEBUG:-}" = "true" ]; then
+        echo "DEBUG: Environment variables:"
+        echo "  SCRIPT_DIR: $SCRIPT_DIR"
+        echo "  PROJECT_ROOT: $PROJECT_ROOT"
+        echo "  ENVIRONMENT: $ENVIRONMENT"
+        echo "  VAULT_FILE: $VAULT_FILE"
+        echo "  VAULT_DIR: $VAULT_DIR"
+        echo "  PATH: $PATH"
+        echo ""
+        echo "DEBUG: System info:"
+        uname -a
+        echo ""
+        echo "DEBUG: Available commands:"
+        which openssl || echo "  openssl: NOT FOUND"
+        which ansible-vault || echo "  ansible-vault: NOT FOUND"
+        echo ""
+    fi
+}
+
 # Main execution
 main() {
     echo ""
@@ -315,6 +390,8 @@ main() {
     info "Environment: $ENVIRONMENT"
     info "Vault file: $VAULT_FILE"
     echo ""
+
+    debug_environment
 
     # Check if vault file already exists
     if [ -f "$VAULT_FILE" ]; then
@@ -359,11 +436,31 @@ usage() {
     echo "  • Update .gitignore for security"
 }
 
+# Cleanup function
+cleanup() {
+    local exit_code=$?
+    if [ -f "/tmp/vault_pass_$$" ]; then
+        rm -f "/tmp/vault_pass_$$"
+    fi
+    if [ -f "$VAULT_FILE.tmp" ]; then
+        rm -f "$VAULT_FILE.tmp"
+    fi
+    exit $exit_code
+}
+
+# Set up cleanup trap
+trap cleanup EXIT INT TERM
+
 # Handle arguments
 case "${1:-}" in
     -h|--help)
         usage
         exit 0
+        ;;
+    --debug)
+        export DEBUG=true
+        shift
+        main
         ;;
     production|staging|"")
         main

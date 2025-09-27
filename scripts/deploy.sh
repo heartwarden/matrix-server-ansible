@@ -202,14 +202,22 @@ handle_secrets_and_vault() {
     if [ "$GENERATE_SECRETS" = true ]; then
         log "Generating secrets..."
         if ! "$SCRIPT_DIR/generate-secrets.sh" "$ENVIRONMENT"; then
-            error "Secret generation failed"
-            exit 1
+            warn "Primary secret generation failed, trying simple version..."
+            if ! "$SCRIPT_DIR/generate-secrets-simple.sh" "$ENVIRONMENT"; then
+                error "Both secret generation methods failed"
+                info "Try manual generation: ./scripts/generate-secrets-simple.sh $ENVIRONMENT"
+                exit 1
+            fi
         fi
     elif [ "$AUTO_MODE" = true ] && [ ! -f "$vault_file" ]; then
         log "Auto mode: Generating missing secrets..."
         if ! "$SCRIPT_DIR/generate-secrets.sh" "$ENVIRONMENT"; then
-            error "Secret generation failed"
-            exit 1
+            warn "Primary secret generation failed, trying simple version..."
+            if ! "$SCRIPT_DIR/generate-secrets-simple.sh" "$ENVIRONMENT"; then
+                error "Both secret generation methods failed"
+                info "Try manual generation: ./scripts/generate-secrets-simple.sh $ENVIRONMENT"
+                exit 1
+            fi
         fi
     fi
 

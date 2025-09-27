@@ -1,10 +1,10 @@
 #!/bin/bash
-# Simple Matrix Server Deployment - Just Works
-# No complex ansible, no vault issues, just a working Matrix server
+# Ultra Simple Matrix Server - No Python package issues
+# Uses only system packages
 
 set -e
 
-echo "🚀 Simple Matrix Server Setup"
+echo "🚀 Ultra Simple Matrix Server"
 echo "============================="
 echo ""
 
@@ -51,8 +51,8 @@ echo "🔧 Installing Matrix server..."
 apt update
 apt upgrade -y
 
-# Install required packages
-apt install -y postgresql postgresql-contrib redis-server curl gnupg lsb-release python3-venv python3-dev build-essential libffi-dev python3-pip python3-setuptools python3-wheel
+# Install from Debian repos only
+apt install -y postgresql postgresql-contrib redis-server curl gnupg lsb-release
 
 # Install Caddy
 curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
@@ -60,7 +60,7 @@ curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | tee /
 apt update
 apt install -y caddy
 
-# Install Matrix Synapse from Debian repos (simpler)
+# Install Matrix Synapse from system packages
 apt install -y matrix-synapse
 
 # Generate secrets
@@ -76,24 +76,18 @@ sudo -u postgres createuser synapse_user || true
 sudo -u postgres createdb --encoding=UTF8 --locale=C --template=template0 --owner=synapse_user synapse || true
 sudo -u postgres psql -c "ALTER USER synapse_user PASSWORD '$DB_PASSWORD';" || true
 
-# Create synapse user
-useradd -r -s /bin/false -m -d /var/lib/matrix-synapse synapse || true
-
-# Generate Synapse config
+# Configure Synapse
 echo "⚙️ Configuring Synapse..."
-# Stop synapse if running
+
+# Stop synapse
 systemctl stop matrix-synapse 2>/dev/null || true
 
-# Generate config if it doesn't exist
-if [ ! -f "/etc/matrix-synapse/homeserver.yaml" ]; then
-    /usr/bin/generate_config \
-        --server-name="$HOMESERVER_DOMAIN" \
-        --config-path="/etc/matrix-synapse/homeserver.yaml" \
-        --generate-secrets \
-        --report-stats=no
+# Backup existing config
+if [ -f "/etc/matrix-synapse/homeserver.yaml" ]; then
+    cp /etc/matrix-synapse/homeserver.yaml /etc/matrix-synapse/homeserver.yaml.backup
 fi
 
-# Configure Synapse
+# Create new config
 cat > /etc/matrix-synapse/homeserver.yaml << EOF
 server_name: "$HOMESERVER_DOMAIN"
 public_baseurl: "https://$HOMESERVER_DOMAIN"
@@ -155,7 +149,16 @@ media_retention:
 
 # Security
 bcrypt_rounds: 12
+
+# Presence
+presence:
+  enabled: true
 EOF
+
+# Generate signing key if it doesn't exist
+if [ ! -f "/etc/matrix-synapse/signing.key" ]; then
+    openssl genpkey -algorithm ed25519 -out /etc/matrix-synapse/signing.key
+fi
 
 # Create log config
 cat > /etc/matrix-synapse/log.yaml << EOF
@@ -189,7 +192,7 @@ EOF
 
 # Set permissions
 mkdir -p /var/log/matrix-synapse
-chown -R synapse:synapse /etc/matrix-synapse /var/lib/matrix-synapse /var/log/matrix-synapse
+chown -R matrix-synapse:matrix-synapse /etc/matrix-synapse /var/lib/matrix-synapse /var/log/matrix-synapse
 
 # Configure Caddy
 echo "🌐 Setting up Caddy..."
@@ -224,7 +227,7 @@ echo "🌍 Installing Element Web..."
 mkdir -p /var/www/element
 cd /tmp
 ELEMENT_VERSION="v1.11.50"
-wget https://github.com/vector-im/element-web/releases/download/$ELEMENT_VERSION/element-$ELEMENT_VERSION.tar.gz
+wget -q https://github.com/vector-im/element-web/releases/download/$ELEMENT_VERSION/element-$ELEMENT_VERSION.tar.gz
 tar -xzf element-$ELEMENT_VERSION.tar.gz
 cp -r element-$ELEMENT_VERSION/* /var/www/element/
 
@@ -238,20 +241,7 @@ cat > /var/www/element/config.json << EOF
         }
     },
     "brand": "Element",
-    "integrations_ui_url": "https://scalar.vector.im/",
-    "integrations_rest_url": "https://scalar.vector.im/api",
-    "integrations_widgets_urls": [
-        "https://scalar.vector.im/_matrix/integrations/v1",
-        "https://scalar.vector.im/api",
-        "https://scalar-staging.vector.im/_matrix/integrations/v1",
-        "https://scalar-staging.vector.im/api",
-        "https://scalar-staging.riot.im/scalar/api"
-    ],
-    "hosting_signup_link": "",
-    "bug_report_endpoint_url": "",
-    "uisi_autorageshake_app": "",
     "showLabsSettings": false,
-    "piwik": false,
     "roomDirectory": {
         "servers": ["$HOMESERVER_DOMAIN", "matrix.org"]
     },
@@ -260,35 +250,11 @@ cat > /var/www/element/config.json << EOF
     },
     "setting_defaults": {
         "breadcrumbs": true
-    },
-    "jitsi": {
-        "preferred_domain": "meet.jit.si"
     }
 }
 EOF
 
 chown -R www-data:www-data /var/www/element
-
-# Create systemd service for Synapse
-cat > /etc/systemd/system/matrix-synapse.service << EOF
-[Unit]
-Description=Synapse Matrix homeserver
-After=network.target
-
-[Service]
-Type=exec
-User=synapse
-Group=synapse
-WorkingDirectory=/var/lib/matrix-synapse
-ExecStart=/usr/local/bin/synctl start /etc/matrix-synapse/homeserver.yaml
-ExecReload=/bin/kill -HUP \$MAINPID
-Restart=on-failure
-RestartSec=3
-SyslogIdentifier=matrix-synapse
-
-[Install]
-WantedBy=multi-user.target
-EOF
 
 # Create admin script
 cat > /usr/local/bin/create-matrix-admin.sh << 'EOF'
@@ -302,12 +268,12 @@ USERNAME="$1"
 PASSWORD="$2"
 HOMESERVER=$(grep "server_name:" /etc/matrix-synapse/homeserver.yaml | cut -d'"' -f2 | head -n1)
 
-# Try register_new_matrix_user first
-if register_new_matrix_user -u "$USERNAME" -p "$PASSWORD" -a -c /etc/matrix-synapse/homeserver.yaml http://localhost:8008; then
-    echo "✅ User $USERNAME created successfully"
+# Try register_new_matrix_user
+if command -v register_new_matrix_user >/dev/null 2>&1; then
+    register_new_matrix_user -u "$USERNAME" -p "$PASSWORD" -a -c /etc/matrix-synapse/homeserver.yaml http://localhost:8008
 else
-    echo "❌ Failed to create user $USERNAME"
-    echo "Try manually: register_new_matrix_user -u $USERNAME -p $PASSWORD -a -c /etc/matrix-synapse/homeserver.yaml http://localhost:8008"
+    echo "❌ register_new_matrix_user not found"
+    echo "Create user manually via Element web or another Matrix client"
 fi
 EOF
 
@@ -315,7 +281,6 @@ chmod +x /usr/local/bin/create-matrix-admin.sh
 
 # Start services
 echo "🚀 Starting services..."
-systemctl daemon-reload
 systemctl enable redis-server postgresql caddy matrix-synapse
 systemctl start redis-server postgresql
 systemctl start matrix-synapse
@@ -324,19 +289,16 @@ systemctl start caddy
 
 # Create admin user
 echo "👤 Creating admin user..."
-# Wait for synapse to be ready
-sleep 10
-register_new_matrix_user -u "$ADMIN_USERNAME" -p "$ADMIN_PASSWORD" -a -c /etc/matrix-synapse/homeserver.yaml http://localhost:8008 || {
-    echo "Creating admin user via direct method..."
-    # Alternative method using synapse admin API
-    curl -X POST "http://localhost:8008/_synapse/admin/v2/users/@${ADMIN_USERNAME}:${HOMESERVER_DOMAIN}" \
-        -H "Content-Type: application/json" \
-        -d "{
-            \"password\": \"$ADMIN_PASSWORD\",
-            \"admin\": true,
-            \"deactivated\": false
-        }" || echo "Admin user creation will be done manually"
-}
+sleep 5
+if command -v register_new_matrix_user >/dev/null 2>&1; then
+    register_new_matrix_user -u "$ADMIN_USERNAME" -p "$ADMIN_PASSWORD" -a -c /etc/matrix-synapse/homeserver.yaml http://localhost:8008 || {
+        echo "⚠️  Admin user creation failed - create manually after setup"
+        echo "Command: sudo /usr/local/bin/create-matrix-admin.sh $ADMIN_USERNAME $ADMIN_PASSWORD"
+    }
+else
+    echo "⚠️  register_new_matrix_user not available - create admin user manually"
+    echo "Use Element web interface or another Matrix client"
+fi
 
 echo ""
 echo "🎉 Matrix server setup complete!"
@@ -358,4 +320,6 @@ systemctl status matrix-synapse caddy postgresql redis-server --no-pager -l
 echo ""
 echo "Create more users:"
 echo "sudo /usr/local/bin/create-matrix-admin.sh username password"
+echo ""
+echo "If admin user creation failed, create it manually via Element web interface"
 echo ""

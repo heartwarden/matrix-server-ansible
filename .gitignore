@@ -60,15 +60,23 @@ Thumbs.db
 *_ecdsa
 *.pub
 
-# Sensitive configuration files (but not scripts)
-# Allow management scripts in scripts/ directory
-inventory/**/vault.yml
-!scripts/*vault*.sh
-!scripts/*secret*.sh
-*password*
-*secret*
-*key*
-# But exclude scripts directory from the above patterns
+# Sensitive files - be very specific to avoid blocking scripts
+*.pem
+*.key
+*_rsa
+*_ed25519
+*.p12
+*.jks
+
+# Vault files (keep encrypted ones, block unencrypted)
+.vault_pass
+.vault_password
+vault_password*
+*vault_pass*
+
+# But allow our management scripts
+!setup-matrix-secrets.sh
+!*deploy*.sh
 !scripts/
 
 # Log files

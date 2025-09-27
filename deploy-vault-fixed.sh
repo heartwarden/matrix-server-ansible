@@ -1,11 +1,11 @@
 #!/bin/bash
-# Simple Matrix Deployment - No TUI, just prompts and deploy
-# For when you just want to get Matrix running quickly
+# Matrix Deployment with Fixed Vault Encryption
+# Handles ansible-vault issues properly
 
 set -e
 
-echo "🚀 Matrix Server Quick Deploy"
-echo "============================="
+echo "🚀 Matrix Server Deploy (Fixed Vault)"
+echo "===================================="
 echo ""
 
 # Check if we're root
@@ -131,8 +131,10 @@ VAULT_PASSWORD=$(openssl rand -base64 32)
 echo "$VAULT_PASSWORD" > .vault_pass
 chmod 600 .vault_pass
 
-# Create vault file
-cat > inventory/production/group_vars/all/vault.yml << EOF
+echo "🔐 Creating encrypted vault file..."
+
+# Method 1: Use ansible-vault create with stdin
+cat << EOF | ansible-vault create inventory/production/group_vars/all/vault.yml --vault-password-file .vault_pass
 ---
 vault_ssl_email: "$SSL_EMAIL"
 vault_admin_username: "$ADMIN_USERNAME"
@@ -144,15 +146,20 @@ vault_registration_secret: "$REGISTRATION_SECRET"
 vault_coturn_secret: "$COTURN_SECRET"
 EOF
 
-# Encrypt vault file
-echo "🔐 Encrypting vault file..."
-if ! ansible-vault encrypt inventory/production/group_vars/all/vault.yml --vault-password-file .vault_pass --vault-id default@.vault_pass 2>/dev/null; then
-    # Try without vault-id
-    if ! ansible-vault encrypt inventory/production/group_vars/all/vault.yml --vault-password-file .vault_pass 2>/dev/null; then
-        # Try with different approach
-        VAULT_PASS=$(cat .vault_pass)
-        echo "$VAULT_PASS" | ansible-vault encrypt inventory/production/group_vars/all/vault.yml --vault-id @prompt
-    fi
+# Verify vault file was created
+if [ -f "inventory/production/group_vars/all/vault.yml" ]; then
+    echo "✅ Encrypted vault file created successfully!"
+else
+    echo "❌ Failed to create vault file"
+    exit 1
+fi
+
+# Test vault file can be decrypted
+if ansible-vault view inventory/production/group_vars/all/vault.yml --vault-password-file .vault_pass >/dev/null 2>&1; then
+    echo "✅ Vault file encryption verified!"
+else
+    echo "❌ Vault file verification failed"
+    exit 1
 fi
 
 echo "✅ Configuration created!"
@@ -174,6 +181,8 @@ echo ""
 echo "Admin credentials:"
 echo "Username: $ADMIN_USERNAME"
 echo "Password: $ADMIN_PASSWORD"
+echo ""
+echo "🔐 Vault password saved to: .vault_pass (keep this secure!)"
 echo ""
 echo "Next steps:"
 echo "1. Configure DNS:"

@@ -4,8 +4,12 @@
 
 set -e
 
-# Check if TUI configuration exists
-if [ "$1" = "--configure" ] || [ ! -f "inventory/production/hosts.yml" ]; then
+# Check command line options
+if [ "$1" = "--quick" ]; then
+    echo "🚀 Starting quick configuration..."
+    ./quick-configure.sh
+    exit $?
+elif [ "$1" = "--configure" ] || [ ! -f "inventory/production/hosts.yml" ]; then
     echo "🚀 Starting TUI configuration..."
     ./configure-matrix.sh
 else

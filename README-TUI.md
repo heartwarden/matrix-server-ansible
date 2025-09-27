@@ -2,13 +2,25 @@
 
 **Configure everything through an interactive TUI, then deploy with a single command.**
 
-## Quick Start (One Command)
+## Quick Start (Choose Your Style)
 
+### Option 1: Quick Configuration (Recommended)
+```bash
+./one-shot-deploy.sh --quick
+```
+Simple prompts, no complex TUI - just enter your domains and deploy!
+
+### Option 2: Full TUI Configuration
 ```bash
 ./one-shot-deploy.sh
 ```
+Complete interactive TUI with validation and advanced options.
 
-That's it! The TUI will guide you through configuration, then deploy automatically.
+### Option 3: Quick Configure Only
+```bash
+./quick-configure.sh
+```
+Just the configuration prompts with immediate deployment.
 
 ## What It Does
 
@@ -39,9 +51,10 @@ That's it! The TUI will guide you through configuration, then deploy automatical
 
 | Command | Purpose |
 |---------|---------|
+| `./one-shot-deploy.sh --quick` | **Quick prompts + deployment (RECOMMENDED)** |
+| `./quick-configure.sh` | Simple configuration prompts only |
 | `./one-shot-deploy.sh` | Full TUI configuration + deployment |
-| `./one-shot-deploy.sh --configure` | Force re-configuration |
-| `./configure-matrix.sh` | TUI configuration only |
+| `./configure-matrix.sh` | Advanced TUI configuration only |
 | `./smart-deploy.sh` | Smart deployment (advanced) |
 | `./deploy-matrix.sh` | Simple deployment |
 | `./pre-flight-check.sh` | System readiness check |

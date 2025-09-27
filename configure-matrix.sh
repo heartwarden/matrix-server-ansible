@@ -23,6 +23,7 @@ STAR="⭐"
 GEAR="⚙️"
 SHIELD="🛡️"
 ROCKET="🚀"
+GLOBE="🌐"
 
 clear
 
@@ -126,7 +127,12 @@ prompt_choice() {
 
 validate_domain() {
     local domain="$1"
-    if [[ "$domain" =~ ^[a-zA-Z0-9][a-zA-Z0-9-]{1,61}[a-zA-Z0-9]\.[a-zA-Z]{2,}$ ]]; then
+    # Check if domain is not empty and has valid format
+    if [ -z "$domain" ]; then
+        return 1
+    fi
+    # Basic domain validation - allow letters, numbers, dots, hyphens
+    if [[ "$domain" =~ ^[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$ ]] && [[ ! "$domain" =~ \.\.|\.$ ]]; then
         return 0
     else
         return 1
@@ -135,6 +141,10 @@ validate_domain() {
 
 validate_email() {
     local email="$1"
+    # Check if email is not empty and has valid format
+    if [ -z "$email" ]; then
+        return 1
+    fi
     if [[ "$email" =~ ^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$ ]]; then
         return 0
     else
@@ -204,11 +214,12 @@ configure_domains() {
 
     while true; do
         prompt_input "Matrix domain (where Element web will be hosted)" "chat.yourdomain.com" MATRIX_DOMAIN
-        if validate_domain "$MATRIX_DOMAIN"; then
+        if [ -n "$MATRIX_DOMAIN" ] && validate_domain "$MATRIX_DOMAIN"; then
             show_success "Matrix domain: $MATRIX_DOMAIN"
             break
         else
-            show_error "Invalid domain format. Please try again."
+            show_error "Invalid domain format. Please enter a valid domain like: chat.yourdomain.com"
+            echo -e "${BLUE}Example: chat.example.com, matrix.mydomain.org${NC}"
         fi
     done
 
@@ -216,11 +227,12 @@ configure_domains() {
 
     while true; do
         prompt_input "Homeserver domain (Matrix federation domain)" "matrix.yourdomain.com" HOMESERVER_DOMAIN
-        if validate_domain "$HOMESERVER_DOMAIN"; then
+        if [ -n "$HOMESERVER_DOMAIN" ] && validate_domain "$HOMESERVER_DOMAIN"; then
             show_success "Homeserver domain: $HOMESERVER_DOMAIN"
             break
         else
-            show_error "Invalid domain format. Please try again."
+            show_error "Invalid domain format. Please enter a valid domain like: matrix.yourdomain.com"
+            echo -e "${BLUE}Example: matrix.example.com, synapse.mydomain.org${NC}"
         fi
     done
 
@@ -228,15 +240,19 @@ configure_domains() {
 
     while true; do
         prompt_input "SSL certificate email" "admin@yourdomain.com" SSL_EMAIL
-        if validate_email "$SSL_EMAIL"; then
+        if [ -n "$SSL_EMAIL" ] && validate_email "$SSL_EMAIL"; then
             show_success "SSL email: $SSL_EMAIL"
             break
         else
-            show_error "Invalid email format. Please try again."
+            show_error "Invalid email format. Please enter a valid email address"
+            echo -e "${BLUE}Example: admin@example.com, certificates@mydomain.org${NC}"
         fi
     done
 
     echo ""
+
+    show_info "Press Enter to continue..."
+    read
 }
 
 configure_server() {

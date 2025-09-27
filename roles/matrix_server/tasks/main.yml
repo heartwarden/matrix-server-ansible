@@ -17,9 +17,7 @@
       - postgresql
       - postgresql-contrib
       - redis-server
-      - nginx
       - certbot
-      - python3-certbot-nginx
       - coturn
     state: present
     update_cache: yes
@@ -74,9 +72,6 @@
   when: matrix_element_enabled | default(false)
   ignore_errors: yes
 
-- name: Configure Nginx
-  include_tasks: nginx.yml
-  ignore_errors: yes
 
 - name: Configure SSL certificates
   include_tasks: ssl.yml

@@ -1,0 +1,164 @@
+---
+- name: Install Matrix Synapse dependencies
+  apt:
+    name:
+      - python3
+      - python3-pip
+      - python3-venv
+      - python3-dev
+      - build-essential
+      - libffi-dev
+      - libjpeg-dev
+      - libpq-dev
+      - libssl-dev
+      - libxml2-dev
+      - libxslt1-dev
+      - zlib1g-dev
+      - pkg-config
+    state: present
+    update_cache: yes
+
+- name: Create Matrix Synapse virtual environment
+  command: python3 -m venv {{ matrix_synapse_home }}/venv
+  args:
+    creates: "{{ matrix_synapse_home }}/venv"
+  become_user: "{{ matrix_synapse_user }}"
+
+- name: Upgrade pip in virtual environment
+  pip:
+    name: pip
+    state: latest
+    virtualenv: "{{ matrix_synapse_home }}/venv"
+    virtualenv_command: python3 -m venv
+  become_user: "{{ matrix_synapse_user }}"
+
+- name: Install Matrix Synapse in virtual environment
+  pip:
+    name:
+      - matrix-synapse[postgres,systemd,url-preview,user-search]
+      - psycopg2-binary
+    state: present
+    virtualenv: "{{ matrix_synapse_home }}/venv"
+    virtualenv_command: python3 -m venv
+  become_user: "{{ matrix_synapse_user }}"
+  register: synapse_installation
+
+- name: Generate Matrix Synapse signing key
+  command: >
+    {{ matrix_synapse_home }}/venv/bin/python -m synapse.app.homeserver
+    --config-path {{ matrix_synapse_config_dir }}/homeserver.yaml
+    --generate-keys
+  args:
+    creates: "{{ matrix_synapse_config_dir }}/signing.key"
+  become_user: "{{ matrix_synapse_user }}"
+  when: synapse_installation is succeeded
+
+- name: Create Matrix Synapse configuration file
+  template:
+    src: homeserver.yaml.j2
+    dest: "{{ matrix_synapse_config_dir }}/homeserver.yaml"
+    owner: "{{ matrix_synapse_user }}"
+    group: "{{ matrix_synapse_group }}"
+    mode: '0640'
+    backup: yes
+  notify: restart matrix-synapse
+
+- name: Create Matrix Synapse logging configuration
+  template:
+    src: log.yaml.j2
+    dest: "{{ matrix_synapse_config_dir }}/log.yaml"
+    owner: "{{ matrix_synapse_user }}"
+    group: "{{ matrix_synapse_group }}"
+    mode: '0640'
+  notify: restart matrix-synapse
+
+- name: Generate signing key if it doesn't exist
+  shell: >
+    {{ matrix_synapse_home }}/venv/bin/python -c
+    "from synapse.config.key import generate_signing_key;
+    generate_signing_key('{{ matrix_synapse_config_dir }}/signing.key')"
+  args:
+    creates: "{{ matrix_synapse_config_dir }}/signing.key"
+  become_user: "{{ matrix_synapse_user }}"
+
+- name: Set proper permissions on signing key
+  file:
+    path: "{{ matrix_synapse_config_dir }}/signing.key"
+    owner: "{{ matrix_synapse_user }}"
+    group: "{{ matrix_synapse_group }}"
+    mode: '0600'
+
+- name: Create Matrix Synapse systemd service
+  template:
+    src: matrix-synapse.service.j2
+    dest: /etc/systemd/system/matrix-synapse.service
+    owner: root
+    group: root
+    mode: '0644'
+  notify:
+    - reload systemd
+    - restart matrix-synapse
+
+- name: Create media cleanup script
+  template:
+    src: media-cleanup.sh.j2
+    dest: /usr/local/bin/matrix-media-cleanup.sh
+    owner: root
+    group: root
+    mode: '0755'
+  when: matrix_media_cleanup_enabled
+
+- name: Create media cleanup cron job
+  cron:
+    name: "Matrix media cleanup"
+    cron_file: matrix-media-cleanup
+    user: "{{ matrix_synapse_user }}"
+    job: "/usr/local/bin/matrix-media-cleanup.sh >/dev/null 2>&1"
+    minute: "0"
+    hour: "3"
+    weekday: "0"
+  when: matrix_media_cleanup_enabled
+
+- name: Initialize Matrix Synapse database
+  command: >
+    {{ matrix_synapse_home }}/venv/bin/python -m synapse.app.homeserver
+    --config-path {{ matrix_synapse_config_dir }}/homeserver.yaml
+    --run-background-tasks
+  become_user: "{{ matrix_synapse_user }}"
+  register: db_init
+  changed_when: "'Database is up-to-date' not in db_init.stderr"
+  failed_when: db_init.rc != 0 and 'Database is up-to-date' not in db_init.stderr
+
+- name: Enable and start Matrix Synapse service
+  systemd:
+    name: matrix-synapse
+    enabled: yes
+    state: started
+    daemon_reload: yes
+
+- name: Wait for Matrix Synapse to start
+  wait_for:
+    port: 8008
+    host: 127.0.0.1
+    delay: 10
+    timeout: 60
+
+- name: Verify Matrix Synapse is responding
+  uri:
+    url: "http://127.0.0.1:8008/_matrix/client/versions"
+    method: GET
+    status_code: 200
+  register: synapse_health_check
+  retries: 5
+  delay: 5
+
+- name: Display Matrix Synapse installation status
+  debug:
+    msg:
+      - "Matrix Synapse installation completed!"
+      - "Service status: {{ 'Running' if synapse_health_check.status == 200 else 'Error' }}"
+      - "Configuration: {{ matrix_synapse_config_dir }}/homeserver.yaml"
+      - "Logs: {{ matrix_synapse_log_dir }}/homeserver.log"
+      - "Privacy settings: Email/CAPTCHA disabled, no IP logging, 5min redaction window"
+      - "Media cleanup: {{ 'Enabled (90 days)' if matrix_media_cleanup_enabled else 'Disabled' }}"
+      - "Presence: {{ 'Enabled' if matrix_presence_enabled else 'Disabled' }}"

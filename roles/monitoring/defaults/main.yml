@@ -43,7 +43,7 @@ log_compress_enabled: true
 # Service monitoring
 monitor_services:
   - ssh
-  - nginx
+  - caddy
   - fail2ban
   - ufw
   - postgresql

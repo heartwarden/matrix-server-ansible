@@ -14,38 +14,83 @@
     state: started
     enabled: yes
 
+- name: Check if Matrix database user exists
+  become_user: postgres
+  command: psql -t -c "SELECT 1 FROM pg_roles WHERE rolname='{{ matrix_database_user | default('synapse') }}'"
+  register: user_exists
+  changed_when: false
+  failed_when: false
+
+- name: Validate database password is set
+  fail:
+    msg: "Matrix database password must be set. Please ensure vault_matrix_database_password is defined."
+  when: matrix_database_password == 'changeme' or matrix_database_password == ''
+
 - name: Create Matrix database user
   become_user: postgres
-  postgresql_user:
-    name: "{{ matrix_database_user }}"
-    password: "{{ matrix_database_password }}"
-    encrypted: yes
-    state: present
-  vars:
-    ansible_ssh_pipelining: true
+  command: >
+    psql -c "CREATE USER {{ matrix_database_user | default('synapse') }}
+    WITH ENCRYPTED PASSWORD '{{ matrix_database_password }}'
+    NOSUPERUSER NOCREATEDB NOCREATEROLE;"
+  when: user_exists.stdout.strip() != "1"
+  register: user_creation_result
+  failed_when: user_creation_result.rc != 0 and 'already exists' not in user_creation_result.stderr
+
+- name: Check if Matrix database exists
+  become_user: postgres
+  command: psql -t -c "SELECT 1 FROM pg_database WHERE datname='{{ matrix_database_name | default('synapse') }}'"
+  register: db_exists
+  changed_when: false
+  failed_when: false
 
 - name: Create Matrix database
   become_user: postgres
-  postgresql_db:
-    name: "{{ matrix_database_name }}"
-    owner: "{{ matrix_database_user }}"
-    encoding: 'UTF-8'
-    lc_collate: 'C'
-    lc_ctype: 'C'
-    template: 'template0'
-    state: present
-  vars:
-    ansible_ssh_pipelining: true
+  command: >
+    psql -c "CREATE DATABASE {{ matrix_database_name | default('synapse') }}
+    WITH OWNER={{ matrix_database_user | default('synapse') }}
+    ENCODING='UTF-8'
+    LC_COLLATE='C'
+    LC_CTYPE='C'
+    TEMPLATE=template0;"
+  when: db_exists.stdout.strip() != "1"
+  register: db_creation_result
+  failed_when: db_creation_result.rc != 0 and 'already exists' not in db_creation_result.stderr
 
-- name: Configure PostgreSQL authentication
+- name: Detect PostgreSQL version
+  shell: ls /etc/postgresql/ | head -1
+  register: postgresql_version_detected
+  changed_when: false
+
+- name: Set PostgreSQL version fact
+  set_fact:
+    postgresql_version: "{{ postgresql_version_detected.stdout }}"
+
+- name: Backup original pg_hba.conf
+  copy:
+    src: /etc/postgresql/{{ postgresql_version }}/main/pg_hba.conf
+    dest: /etc/postgresql/{{ postgresql_version }}/main/pg_hba.conf.backup
+    remote_src: yes
+    backup: yes
+  register: hba_backup
+
+- name: Configure PostgreSQL authentication for Matrix (secure)
+  blockinfile:
+    path: /etc/postgresql/{{ postgresql_version }}/main/pg_hba.conf
+    block: |
+      # Matrix Synapse database access
+      local   {{ matrix_database_name | default('synapse') }}   {{ matrix_database_user | default('synapse') }}   scram-sha-256
+      host    {{ matrix_database_name | default('synapse') }}   {{ matrix_database_user | default('synapse') }}   127.0.0.1/32   scram-sha-256
+      host    {{ matrix_database_name | default('synapse') }}   {{ matrix_database_user | default('synapse') }}   ::1/128        scram-sha-256
+    insertafter: '^# Database administrative login'
+    marker: '# {mark} ANSIBLE MANAGED BLOCK - Matrix authentication'
+  notify: restart postgresql
+
+- name: Ensure PostgreSQL only allows secure connections
   lineinfile:
     path: /etc/postgresql/{{ postgresql_version }}/main/pg_hba.conf
-    regexp: '^local\s+{{ matrix_database_name }}\s+{{ matrix_database_user }}'
-    line: 'local {{ matrix_database_name }} {{ matrix_database_user }} md5'
-    insertafter: '^# Database administrative login'
+    regexp: '^host\s+all\s+all\s+0\.0\.0\.0/0\s+.*'
+    state: absent
   notify: restart postgresql
-  vars:
-    postgresql_version: "{{ ansible_facts['postgresql_version'] | default('15') }}"
 
 - name: Configure PostgreSQL to listen on localhost
   lineinfile:
@@ -53,17 +98,6 @@
     regexp: "^#?listen_addresses = "
     line: "listen_addresses = 'localhost'"
   notify: restart postgresql
-  vars:
-    postgresql_version: "{{ ansible_facts['postgresql_version'] | default('15') }}"
-
-- name: Set PostgreSQL shared_preload_libraries
-  lineinfile:
-    path: /etc/postgresql/{{ postgresql_version }}/main/postgresql.conf
-    regexp: "^#?shared_preload_libraries = "
-    line: "shared_preload_libraries = 'pg_stat_statements'"
-  notify: restart postgresql
-  vars:
-    postgresql_version: "{{ ansible_facts['postgresql_version'] | default('15') }}"
 
 - name: Set PostgreSQL max_connections
   lineinfile:
@@ -71,8 +105,6 @@
     regexp: "^#?max_connections = "
     line: "max_connections = {{ postgresql_max_connections | default('200') }}"
   notify: restart postgresql
-  vars:
-    postgresql_version: "{{ ansible_facts['postgresql_version'] | default('15') }}"
 
 - name: Set PostgreSQL shared_buffers
   lineinfile:
@@ -80,8 +112,34 @@
     regexp: "^#?shared_buffers = "
     line: "shared_buffers = {{ postgresql_shared_buffers | default('256MB') }}"
   notify: restart postgresql
-  vars:
-    postgresql_version: "{{ ansible_facts['postgresql_version'] | default('15') }}"
+
+- name: Configure PostgreSQL logging for security
+  lineinfile:
+    path: /etc/postgresql/{{ postgresql_version }}/main/postgresql.conf
+    regexp: "^#?{{ item.setting }} = "
+    line: "{{ item.setting }} = {{ item.value }}"
+  loop:
+    - { setting: 'log_connections', value: 'on' }
+    - { setting: 'log_disconnections', value: 'on' }
+    - { setting: 'log_statement', value: "'all'" }
+    - { setting: 'log_line_prefix', value: "'%t [%p]: [%l-1] user=%u,db=%d,app=%a,client=%h '" }
+    - { setting: 'log_lock_waits', value: 'on' }
+    - { setting: 'log_temp_files', value: '0' }
+  notify: restart postgresql
+
+- name: Set PostgreSQL password encryption
+  lineinfile:
+    path: /etc/postgresql/{{ postgresql_version }}/main/postgresql.conf
+    regexp: "^#?password_encryption = "
+    line: "password_encryption = scram-sha-256"
+  notify: restart postgresql
+
+- name: Configure PostgreSQL SSL
+  lineinfile:
+    path: /etc/postgresql/{{ postgresql_version }}/main/postgresql.conf
+    regexp: "^#?ssl = "
+    line: "ssl = on"
+  notify: restart postgresql
 
 - name: Restart PostgreSQL to apply configuration changes
   systemd:
@@ -94,18 +152,98 @@
   register: postgresql_status
   changed_when: false
 
-- name: Test database connection
+- name: Grant necessary privileges to Matrix user
   become_user: postgres
-  command: psql -d {{ matrix_database_name }} -c "SELECT 1;"
+  command: >
+    psql -d {{ matrix_database_name | default('synapse') }} -c
+    "GRANT ALL PRIVILEGES ON DATABASE {{ matrix_database_name | default('synapse') }} TO {{ matrix_database_user | default('synapse') }};
+    GRANT ALL ON SCHEMA public TO {{ matrix_database_user | default('synapse') }};"
+  register: grant_privileges
+  changed_when: false
+  failed_when: false
+
+- name: Test database connection as Matrix user
+  become_user: postgres
+  command: >
+    psql -d {{ matrix_database_name | default('synapse') }}
+    -c "SELECT current_user, current_database();"
   register: db_test
   changed_when: false
   vars:
     ansible_ssh_pipelining: true
 
-- name: Display PostgreSQL status
+- name: Set strict file permissions on PostgreSQL data directory
+  file:
+    path: /var/lib/postgresql/{{ postgresql_version }}/main
+    owner: postgres
+    group: postgres
+    mode: '0700'
+    recurse: no
+
+- name: Set permissions on PostgreSQL configuration files
+  file:
+    path: "{{ item }}"
+    owner: postgres
+    group: postgres
+    mode: '0640'
+  loop:
+    - /etc/postgresql/{{ postgresql_version }}/main/postgresql.conf
+    - /etc/postgresql/{{ postgresql_version }}/main/pg_hba.conf
+
+- name: Validate PostgreSQL configuration
+  become_user: postgres
+  command: /usr/lib/postgresql/{{ postgresql_version }}/bin/postgres --config-file=/etc/postgresql/{{ postgresql_version }}/main/postgresql.conf --check
+  register: config_validation
+  changed_when: false
+  failed_when: config_validation.rc != 0
+
+- name: Force handler execution to restart PostgreSQL
+  meta: flush_handlers
+
+- name: Wait for PostgreSQL to be ready after restart
+  wait_for:
+    port: 5432
+    host: localhost
+    delay: 5
+    timeout: 30
+
+- name: Test Matrix user can connect to database
+  become_user: postgres
+  command: >
+    psql -h localhost -U {{ matrix_database_user | default('synapse') }}
+    -d {{ matrix_database_name | default('synapse') }}
+    -c "SELECT current_user, current_database(), version();"
+  register: final_db_test
+  changed_when: false
+  environment:
+    PGPASSWORD: "{{ matrix_database_password }}"
+
+- name: Verify PostgreSQL security settings
+  become_user: postgres
+  command: >
+    psql -t -c "SHOW {{ item }};"
+  register: security_check
+  changed_when: false
+  loop:
+    - password_encryption
+    - ssl
+    - log_connections
+    - log_statement
+  failed_when: false
+
+- name: Display PostgreSQL setup summary
   debug:
     msg:
-      - "PostgreSQL Status: {{ postgresql_status.stdout }}"
-      - "Database Connection: {{ 'OK' if db_test.rc == 0 else 'Failed' }}"
-      - "Database: {{ matrix_database_name }}"
-      - "User: {{ matrix_database_user }}"
+      - "=== PostgreSQL Setup Complete ==="
+      - "Status: {{ postgresql_status.stdout }}"
+      - "Version: {{ postgresql_version }}"
+      - "Database: {{ matrix_database_name | default('synapse') }}"
+      - "User: {{ matrix_database_user | default('synapse') }}"
+      - "Connection Test: {{ 'OK' if final_db_test.rc == 0 else 'FAILED' }}"
+      - "Configuration: {{ 'Valid' if config_validation.rc == 0 else 'Invalid' }}"
+      - "Security Features:"
+      - "  - Password Encryption: {{ security_check.results[0].stdout.strip() if security_check.results[0].rc == 0 else 'Unknown' }}"
+      - "  - SSL: {{ security_check.results[1].stdout.strip() if security_check.results[1].rc == 0 else 'Unknown' }}"
+      - "  - Connection Logging: {{ security_check.results[2].stdout.strip() if security_check.results[2].rc == 0 else 'Unknown' }}"
+      - "  - Statement Logging: {{ security_check.results[3].stdout.strip() if security_check.results[3].rc == 0 else 'Unknown' }}"
+      - "Ready for Matrix Synapse installation!"

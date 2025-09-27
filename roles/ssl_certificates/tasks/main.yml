@@ -14,7 +14,6 @@
   apt:
     name:
       - certbot
-      - python3-certbot-nginx
     state: absent
   ignore_errors: yes
 

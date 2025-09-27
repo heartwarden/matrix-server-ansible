@@ -19,10 +19,10 @@ ssl_acme_email: "{{ ssl_email }}"
 ssl_key_size: 4096
 ssl_dhparam_size: 4096
 
-# Nginx settings
-nginx_worker_processes: auto
-nginx_worker_connections: 1024
-nginx_client_max_body_size: "50M"
+# Caddy settings
+caddy_version: "2.7.6"
+caddy_log_level: "INFO"
+caddy_access_log: "/var/log/caddy/access.log"
 
 # Coturn settings (for VoIP)
 coturn_realm: "{{ matrix_domain }}"
@@ -51,4 +51,4 @@ rate_limit_burst: 50
 
 # Log levels
 matrix_log_level: "INFO"
-nginx_log_level: "warn"
+caddy_log_level: "INFO"

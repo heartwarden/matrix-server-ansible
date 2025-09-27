@@ -42,6 +42,8 @@ matrix_coturn_max_port: 65535
 # Registration and security
 matrix_registration_enabled: false
 matrix_registration_shared_secret: "{{ vault_registration_secret | default('') }}"
+matrix_registration_requires_email: false
+matrix_registration_requires_captcha: false
 matrix_guest_access_enabled: false
 matrix_federation_enabled: true
 matrix_presence_enabled: true
@@ -56,6 +58,8 @@ matrix_uploads_path: "{{ matrix_synapse_data_dir }}/uploads"
 matrix_log_level: "INFO"
 matrix_log_size: "100MB"
 matrix_log_count: 10
+matrix_log_redact_sensitive: true
+matrix_log_filter_ips: true
 
 # Security settings
 matrix_bcrypt_rounds: 12
@@ -74,6 +78,9 @@ matrix_rc_registration_burst_count: 3.0
 matrix_media_store_path: "{{ matrix_synapse_data_dir }}/media_store"
 matrix_max_image_pixels: "32M"
 matrix_max_spider_size: "10M"
+matrix_media_retention_days: 90
+matrix_media_cleanup_enabled: true
+matrix_media_cleanup_schedule: "0 3 * * 0"  # Weekly on Sunday at 3 AM
 
 # URL previews
 matrix_url_preview_enabled: false
@@ -97,6 +104,25 @@ matrix_push_enabled: true
 # Statistics and metrics
 matrix_metrics_enabled: true
 matrix_metrics_port: 9092
+
+# Privacy and encryption settings
+matrix_redaction_retention_period: 300  # 5 minutes in seconds
+matrix_allow_guest_access: false
+matrix_require_auth_for_profile_requests: true
+matrix_limit_profile_requests_to_users_who_share_rooms: true
+matrix_block_non_admin_invites: false
+matrix_admin_contact: "{{ ssl_email | default('') }}"
+
+# Additional Vault secrets needed
+vault_form_secret: "{{ vault_form_secret | default('changeme') }}"
+vault_macaroon_secret_key: "{{ vault_macaroon_secret_key | default('changeme') }}"
+vault_registration_secret: "{{ vault_registration_secret | default('') }}"
+
+# Message retention and redaction
+matrix_message_retention_policy: false
+matrix_retention_default_min_lifetime: null
+matrix_retention_default_max_lifetime: null
+matrix_redaction_retention_period: 300  # 5 minutes
 
 # Backup configuration
 matrix_backup_enabled: true

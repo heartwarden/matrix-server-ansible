@@ -1,0 +1,60 @@
+# Matrix Synapse Logging Configuration
+# Privacy-focused: NO IP ADDRESS LOGGING
+
+version: 1
+
+formatters:
+  precise:
+    # IMPORTANT: No %(request)s to avoid logging IP addresses
+    format: '%(asctime)s - %(name)s - %(lineno)d - %(levelname)s - %(message)s'
+
+handlers:
+  file:
+    class: logging.handlers.RotatingFileHandler
+    formatter: precise
+    filename: {{ matrix_synapse_log_dir }}/homeserver.log
+    maxBytes: {{ matrix_log_size }}
+    backupCount: {{ matrix_log_count }}
+    encoding: utf8
+
+  # Buffer logs to avoid blocking
+  buffer:
+    class: logging.handlers.MemoryHandler
+    target: file
+    capacity: 10
+    flushLevel: 30  # WARN
+
+root:
+  level: {{ matrix_log_level }}
+  handlers: [buffer]
+
+loggers:
+  synapse.storage.SQL:
+    # Don't log SQL queries to avoid potential data leakage
+    level: WARNING
+
+  synapse.access:
+    # Disable access logging to prevent IP logging
+    level: ERROR
+
+  synapse.http.server:
+    # Reduce HTTP server logging to avoid IP addresses
+    level: WARNING
+
+  synapse.http.client:
+    # Reduce HTTP client logging
+    level: WARNING
+
+  synapse.federation:
+    # Keep federation logs but at higher level
+    level: INFO
+
+  synapse.handlers.auth:
+    # Authentication logs without sensitive details
+    level: WARNING
+
+  synapse.metrics:
+    # Metrics logging
+    level: INFO
+
+disable_existing_loggers: false

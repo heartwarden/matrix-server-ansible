@@ -108,7 +108,7 @@
         name: "{{ item }}"
         state: started
         enabled: yes
-      loop: "{{ monitor_services | default(['ssh', 'nginx']) }}"
+      loop: "{{ monitor_services | default(['ssh', 'caddy']) }}"
       register: service_check
 
     - name: Generate system health report
@@ -172,7 +172,7 @@
         state: started
       loop:
         - matrix-synapse
-        - nginx
+        - caddy
         - postgresql
         - redis-server
       when: "'matrix_servers' in group_names"

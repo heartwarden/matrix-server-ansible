@@ -22,25 +22,25 @@ logpath = /var/log/auth.log
 maxretry = 3
 bantime = 7200
 
-[nginx-http-auth]
+[caddy-http-auth]
 enabled = true
 port = http,https
-filter = nginx-http-auth
-logpath = /var/log/nginx/error.log
+filter = caddy-http-auth
+logpath = /var/log/caddy/access.log
 maxretry = 3
 
-[nginx-limit-req]
+[caddy-limit-req]
 enabled = true
 port = http,https
-filter = nginx-limit-req
-logpath = /var/log/nginx/error.log
+filter = caddy-limit-req
+logpath = /var/log/caddy/access.log
 maxretry = 10
 
-[nginx-botsearch]
+[caddy-botsearch]
 enabled = true
 port = http,https
-filter = nginx-botsearch
-logpath = /var/log/nginx/access.log
+filter = caddy-botsearch
+logpath = /var/log/caddy/access.log
 maxretry = 2
 
 [postfix]

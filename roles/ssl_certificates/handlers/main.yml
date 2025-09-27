@@ -1,10 +1,10 @@
 ---
-- name: reload nginx
+- name: reload caddy
   systemd:
-    name: nginx
+    name: caddy
     state: reloaded
 
-- name: restart nginx
+- name: restart caddy
   systemd:
-    name: nginx
+    name: caddy
     state: restarted

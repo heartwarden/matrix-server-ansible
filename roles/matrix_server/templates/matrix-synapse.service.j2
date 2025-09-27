@@ -1,0 +1,45 @@
+[Unit]
+Description=Synapse Matrix homeserver
+Wants=network-online.target
+After=network-online.target postgresql.service
+{% if matrix_redis_enabled %}
+After=redis-server.service
+{% endif %}
+
+[Service]
+Type=notify
+User={{ matrix_synapse_user }}
+Group={{ matrix_synapse_group }}
+WorkingDirectory={{ matrix_synapse_home }}
+ExecStart={{ matrix_synapse_home }}/venv/bin/python -m synapse.app.homeserver --config-path={{ matrix_synapse_config_dir }}/homeserver.yaml
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=always
+RestartSec=3
+SyslogIdentifier=matrix-synapse
+
+# Security settings
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+RestrictRealtime=yes
+RestrictNamespaces=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+
+# Directory permissions
+ReadWritePaths={{ matrix_synapse_data_dir }} {{ matrix_synapse_log_dir }} {{ matrix_media_store_path }}
+ReadOnlyPaths={{ matrix_synapse_config_dir }}
+
+# Environment
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONDONTWRITEBYTECODE=1
+
+[Install]
+WantedBy=multi-user.target

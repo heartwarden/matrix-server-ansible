@@ -16,19 +16,19 @@ log "Starting SSL certificate renewal check"
 if /usr/bin/certbot renew --quiet --no-self-upgrade; then
     log "Certificate renewal check completed successfully"
 
-    # Test nginx configuration
-    if nginx -t > /dev/null 2>&1; then
-        log "Nginx configuration test passed"
+    # Test Caddy configuration
+    if caddy validate --config {{ caddy_config_file }} > /dev/null 2>&1; then
+        log "Caddy configuration test passed"
 
-        # Reload nginx
-        if systemctl reload nginx; then
-            log "Nginx reloaded successfully"
+        # Reload Caddy
+        if systemctl reload caddy; then
+            log "Caddy reloaded successfully"
         else
-            log "ERROR: Failed to reload nginx"
+            log "ERROR: Failed to reload Caddy"
             exit 1
         fi
     else
-        log "ERROR: Nginx configuration test failed"
+        log "ERROR: Caddy configuration test failed"
         exit 1
     fi
 else

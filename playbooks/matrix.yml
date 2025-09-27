@@ -96,7 +96,7 @@
           📁 Configuration Files:
           - Main config: /etc/matrix-synapse/homeserver.yaml
           - Element config: {{ matrix_element_path }}/config.json
-          - Nginx config: /etc/nginx/sites-available/matrix
+          - Caddy config: /etc/caddy/Caddyfile
           - Coturn config: /etc/turnserver.conf
 
           {% if federation_test.status != 200 %}

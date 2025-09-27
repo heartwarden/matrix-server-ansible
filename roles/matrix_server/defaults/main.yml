@@ -122,7 +122,7 @@ vault_registration_secret: "{{ vault_registration_secret | default('') }}"
 matrix_message_retention_policy: false
 matrix_retention_default_min_lifetime: null
 matrix_retention_default_max_lifetime: null
-matrix_redaction_retention_period: 300  # 5 minutes
+# matrix_redaction_retention_period defined above
 
 # Backup configuration
 matrix_backup_enabled: true

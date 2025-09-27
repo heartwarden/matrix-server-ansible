@@ -135,7 +135,38 @@ EOF
     chmod 600 .vault_pass
 
     # Create vault file
-    ./vault-helper.sh "production" "$SSL_EMAIL" "$ADMIN_USERNAME" "$ADMIN_PASSWORD" "$DB_PASSWORD" "$FORM_SECRET" "$MACAROON_SECRET" "$REGISTRATION_SECRET" "$COTURN_SECRET"
+    echo "Creating encrypted vault file..."
+
+    # Simple approach - create vault file directly
+    cat > "/tmp/vault_secrets.yml" << EOF
+---
+vault_ssl_email: "$SSL_EMAIL"
+vault_admin_username: "$ADMIN_USERNAME"
+vault_admin_password: "$ADMIN_PASSWORD"
+vault_matrix_database_password: "$DB_PASSWORD"
+vault_form_secret: "$FORM_SECRET"
+vault_macaroon_secret_key: "$MACAROON_SECRET"
+vault_registration_secret: "$REGISTRATION_SECRET"
+vault_coturn_secret: "$COTURN_SECRET"
+EOF
+
+    # Create vault file with ansible-vault
+    if ansible-vault create "inventory/production/group_vars/all/vault.yml" --vault-password-file .vault_pass < "/tmp/vault_secrets.yml" 2>/dev/null; then
+        echo "✅ Vault file created successfully"
+    else
+        echo "Warning: ansible-vault create failed, trying alternative method..."
+        # Alternative: encrypt the file after creation
+        cp "/tmp/vault_secrets.yml" "inventory/production/group_vars/all/vault.yml"
+        ansible-vault encrypt "inventory/production/group_vars/all/vault.yml" --vault-password-file .vault_pass 2>/dev/null || {
+            echo "❌ Failed to create vault file"
+            rm -f "/tmp/vault_secrets.yml"
+            exit 1
+        }
+        echo "✅ Vault file created with fallback method"
+    fi
+
+    # Clean up
+    rm -f "/tmp/vault_secrets.yml"
 
     echo "✅ Configuration files created!"
     echo ""

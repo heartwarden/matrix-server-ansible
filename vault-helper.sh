@@ -39,7 +39,17 @@ EOF
 
     # Encrypt the vault file
     if [ -f ".vault_pass" ]; then
-        ansible-vault encrypt "/tmp/vault_content.yml" --vault-password-file .vault_pass --output "$vault_file"
+        ansible-vault encrypt "/tmp/vault_content.yml" --vault-password-file .vault_pass --output "$vault_file" 2>/dev/null
+        if [ $? -ne 0 ]; then
+            # Fallback: create vault file directly
+            echo "Warning: ansible-vault encrypt failed, creating vault file directly"
+            VAULT_PASS=$(cat .vault_pass)
+            ansible-vault create "$vault_file" --vault-password-file .vault_pass <<< "$(cat /tmp/vault_content.yml)" 2>/dev/null
+            if [ $? -ne 0 ]; then
+                # Final fallback: manual vault creation
+                echo "$VAULT_PASS" | ansible-vault encrypt_string --vault-id default@.vault_pass --stdin-name 'vault_content' > "$vault_file" <<< "$(cat /tmp/vault_content.yml)"
+            fi
+        fi
     else
         echo "Error: .vault_pass file not found"
         return 1

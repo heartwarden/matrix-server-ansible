@@ -24,6 +24,8 @@ VAULT_PASSWORD_FILE="$PROJECT_DIR/.vault_pass"
 DRY_RUN=false
 SKIP_CHECKS=false
 VERBOSE=false
+GENERATE_SECRETS=false
+AUTO_MODE=false
 
 log() {
     echo -e "${GREEN}[$(date +'%Y-%m-%d %H:%M:%S')] $1${NC}"
@@ -60,6 +62,8 @@ OPTIONS:
     -v, --vault-file FILE    Vault password file [default: .vault_pass]
     -d, --dry-run           Perform a dry run (check mode)
     -s, --skip-checks       Skip pre-flight checks
+    -g, --generate-secrets  Generate new secrets before deployment
+    -a, --auto              Auto mode (generate secrets if missing, no prompts)
     --verbose               Enable verbose output
     -h, --help              Show this help message
 
@@ -67,6 +71,8 @@ EXAMPLES:
     $0                                          # Deploy complete stack to production
     $0 -e staging -p hardening                 # Harden staging servers only
     $0 -p matrix -d                            # Dry run Matrix deployment
+    $0 -g                                      # Generate secrets and deploy
+    $0 -a                                      # Auto mode (generate secrets if needed)
     $0 -i custom_inventory.yml -p maintenance  # Run maintenance with custom inventory
 
 PLAYBOOKS:
@@ -108,6 +114,14 @@ parse_args() {
                 SKIP_CHECKS=true
                 shift
                 ;;
+            -g|--generate-secrets)
+                GENERATE_SECRETS=true
+                shift
+                ;;
+            -a|--auto)
+                AUTO_MODE=true
+                shift
+                ;;
             --verbose)
                 VERBOSE=true
                 shift
@@ -134,6 +148,8 @@ parse_args() {
     debug "Inventory: $INVENTORY"
     debug "Vault file: $VAULT_PASSWORD_FILE"
     debug "Dry run: $DRY_RUN"
+    debug "Generate secrets: $GENERATE_SECRETS"
+    debug "Auto mode: $AUTO_MODE"
 }
 
 check_environment() {
@@ -145,16 +161,17 @@ check_environment() {
         exit 1
     fi
 
-    # Check if virtual environment is activated
-    if [ -z "${VIRTUAL_ENV:-}" ]; then
-        warn "Python virtual environment not activated"
-        info "Run: source activate"
+    # Check Ansible installation
+    if ! command -v ansible-playbook &> /dev/null; then
+        error "ansible-playbook not found. Install Ansible first"
+        info "macOS: brew install ansible"
+        info "Ubuntu/Debian: sudo apt install ansible"
         exit 1
     fi
 
-    # Check Ansible installation
-    if ! command -v ansible-playbook &> /dev/null; then
-        error "ansible-playbook not found. Run ./scripts/setup.sh first"
+    # Check ansible-vault
+    if ! command -v ansible-vault &> /dev/null; then
+        error "ansible-vault not found. Install Ansible first"
         exit 1
     fi
 
@@ -172,14 +189,67 @@ check_environment() {
         exit 1
     fi
 
-    # Check vault password file
-    if [ ! -f "$VAULT_PASSWORD_FILE" ]; then
-        error "Vault password file not found: $VAULT_PASSWORD_FILE"
-        info "Run ./scripts/setup.sh to create one"
+    # Handle secrets and vault
+    handle_secrets_and_vault
+
+    log "Environment check completed"
+}
+
+handle_secrets_and_vault() {
+    local vault_file="$PROJECT_DIR/inventory/$ENVIRONMENT/group_vars/all/vault.yml"
+
+    # Generate secrets if requested or in auto mode
+    if [ "$GENERATE_SECRETS" = true ]; then
+        log "Generating secrets..."
+        if ! "$SCRIPT_DIR/generate-secrets.sh" "$ENVIRONMENT"; then
+            error "Secret generation failed"
+            exit 1
+        fi
+    elif [ "$AUTO_MODE" = true ] && [ ! -f "$vault_file" ]; then
+        log "Auto mode: Generating missing secrets..."
+        if ! "$SCRIPT_DIR/generate-secrets.sh" "$ENVIRONMENT"; then
+            error "Secret generation failed"
+            exit 1
+        fi
+    fi
+
+    # Check vault file exists
+    if [ ! -f "$vault_file" ]; then
+        error "Vault file not found: $vault_file"
+        info "Generate secrets with: $0 --generate-secrets"
         exit 1
     fi
 
-    log "Environment check completed"
+    # Try to find vault password file
+    local found_vault_file=""
+    local possible_files=(
+        "$VAULT_PASSWORD_FILE"
+        "$PROJECT_DIR/.vault_pass"
+        "$PROJECT_DIR/.ansible_vault_password"
+        "$HOME/.ansible_vault_password"
+    )
+
+    for file in "${possible_files[@]}"; do
+        if [ -f "$file" ]; then
+            found_vault_file="$file"
+            VAULT_PASSWORD_FILE="$file"
+            break
+        fi
+    done
+
+    if [ -z "$found_vault_file" ]; then
+        warn "Vault password file not found"
+        if [ "$AUTO_MODE" = false ]; then
+            info "Will prompt for vault password during deployment"
+            VAULT_PASSWORD_FILE=""  # Will use --ask-vault-pass
+        else
+            error "Auto mode requires vault password file"
+            info "Create .vault_pass with your vault password"
+            exit 1
+        fi
+    else
+        log "✓ Using vault password file: $found_vault_file"
+    fi
 }
 
 run_preflight_checks() {
@@ -197,9 +267,17 @@ run_preflight_checks() {
         exit 1
     fi
 
+    # Build vault options
+    local vault_opts=()
+    if [ -n "$VAULT_PASSWORD_FILE" ]; then
+        vault_opts=("--vault-password-file=$VAULT_PASSWORD_FILE")
+    else
+        vault_opts=("--ask-vault-pass")
+    fi
+
     # Test connectivity
     info "Testing SSH connectivity..."
-    if ! ansible all -i "$INVENTORY" -m ping --vault-password-file="$VAULT_PASSWORD_FILE" > /dev/null; then
+    if ! ansible all -i "$INVENTORY" -m ping "${vault_opts[@]}" > /dev/null 2>&1; then
         error "SSH connectivity test failed"
         info "Check your SSH keys and server access"
         exit 1
@@ -207,14 +285,14 @@ run_preflight_checks() {
 
     # Test sudo access
     info "Testing sudo access..."
-    if ! ansible all -i "$INVENTORY" -m command -a "whoami" -b --vault-password-file="$VAULT_PASSWORD_FILE" > /dev/null; then
+    if ! ansible all -i "$INVENTORY" -m command -a "whoami" -b "${vault_opts[@]}" > /dev/null 2>&1; then
         error "Sudo access test failed"
         exit 1
     fi
 
     # Validate playbook syntax
     info "Validating playbook syntax..."
-    if ! ansible-playbook "$PROJECT_DIR/playbooks/$PLAYBOOK.yml" -i "$INVENTORY" --syntax-check --vault-password-file="$VAULT_PASSWORD_FILE" > /dev/null; then
+    if ! ansible-playbook "$PROJECT_DIR/playbooks/$PLAYBOOK.yml" -i "$INVENTORY" --syntax-check "${vault_opts[@]}" > /dev/null 2>&1; then
         error "Playbook syntax validation failed"
         exit 1
     fi
@@ -284,8 +362,14 @@ run_deployment() {
         "ansible-playbook"
         "$PROJECT_DIR/playbooks/$PLAYBOOK.yml"
         "-i" "$INVENTORY"
-        "--vault-password-file=$VAULT_PASSWORD_FILE"
     )
+
+    # Add vault options
+    if [ -n "$VAULT_PASSWORD_FILE" ]; then
+        cmd+=("--vault-password-file=$VAULT_PASSWORD_FILE")
+    else
+        cmd+=("--ask-vault-pass")
+    fi
 
     # Add options
     if [ "$DRY_RUN" = true ]; then

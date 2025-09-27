@@ -33,9 +33,32 @@ auto_reboot_time: "03:00"
 
 # Monitoring
 monitoring_enabled: true
+monitoring_email: "{{ vault_ssl_email }}"
 log_retention_days: 30
 
 # System hardening
 disable_ipv6: false
 kernel_hardening_enabled: true
 sysctl_hardening_enabled: true
+
+# Matrix Server Configuration (Staging)
+# These reference secrets from vault.yml
+matrix_domain: "staging-chat.example.com"  # Change to your staging domain
+matrix_homeserver_name: "staging-matrix.example.com"  # Change to your staging Matrix domain
+ssl_email: "{{ vault_ssl_email }}"  # From vault
+
+# Admin user configuration (from vault)
+admin_username: "{{ vault_admin_username }}"
+admin_user_password: "{{ vault_admin_password }}"
+
+# Database passwords (from vault)
+matrix_database_password: "{{ vault_matrix_database_password }}"
+
+# Matrix secrets (from vault)
+form_secret: "{{ vault_form_secret }}"
+macaroon_secret_key: "{{ vault_macaroon_secret_key }}"
+registration_secret: "{{ vault_registration_secret }}"
+coturn_secret: "{{ vault_coturn_secret }}"
+
+# Staging-specific settings
+letsencrypt_staging: true  # Use Let's Encrypt staging for testing

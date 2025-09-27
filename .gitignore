@@ -37,10 +37,14 @@ vault_pass*
 server-configs/
 !server-configs/.gitkeep
 
-# Ansible Vault passwords
+# Ansible Vault passwords and secrets
 .vault_pass*
 *vault-pass*
 *vault_pass*
+.ansible_vault_password
+vault-backups/
+*.vault
+vault_password*
 
 # Temporary files
 *.tmp
@@ -56,11 +60,16 @@ Thumbs.db
 *_ecdsa
 *.pub
 
-# Sensitive configuration
-*vault*
+# Sensitive configuration files (but not scripts)
+# Allow management scripts in scripts/ directory
+inventory/**/vault.yml
+!scripts/*vault*.sh
+!scripts/*secret*.sh
 *password*
 *secret*
 *key*
+# But exclude scripts directory from the above patterns
+!scripts/
 
 # Log files
 logs/

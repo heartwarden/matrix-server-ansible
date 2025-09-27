@@ -27,10 +27,19 @@ INVENTORY="inventory/$ENVIRONMENT/hosts.yml"
 if [ ! -f "$INVENTORY" ]; then
     echo "ERROR: Inventory file not found: $INVENTORY"
     echo ""
-    echo "Create it by copying the example:"
-    echo "  cp inventory/$ENVIRONMENT/hosts.yml.example $INVENTORY"
-    echo "  nano $INVENTORY"
-    exit 1
+    echo "Available options:"
+    echo "  - Use fixed version: inventory/$ENVIRONMENT/hosts-fixed.yml"
+    echo "  - Copy example: cp inventory/$ENVIRONMENT/hosts.yml.example $INVENTORY"
+    echo "  - Edit existing: nano $INVENTORY"
+
+    # Try to find alternative inventory files
+    if [ -f "inventory/$ENVIRONMENT/hosts-fixed.yml" ]; then
+        echo ""
+        echo "Found fixed inventory file, using it instead..."
+        INVENTORY="inventory/$ENVIRONMENT/hosts-fixed.yml"
+    else
+        exit 1
+    fi
 fi
 
 # Check vault exists
@@ -94,9 +103,16 @@ echo "======================"
 # Run deployment
 START_TIME=$(date +%s)
 
+# Use fixed playbook if available
+PLAYBOOK_FILE="playbooks/$PLAYBOOK.yml"
+if [ ! -f "$PLAYBOOK_FILE" ] && [ -f "playbooks/$PLAYBOOK-fixed.yml" ]; then
+    echo "Using fixed playbook: playbooks/$PLAYBOOK-fixed.yml"
+    PLAYBOOK_FILE="playbooks/$PLAYBOOK-fixed.yml"
+fi
+
 if ansible-playbook \
     -i "$INVENTORY" \
-    "playbooks/$PLAYBOOK.yml" \
+    "$PLAYBOOK_FILE" \
     $VAULT_OPTS \
     -v; then
 

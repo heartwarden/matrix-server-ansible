@@ -43,8 +43,8 @@ sysctl_hardening_enabled: true
 
 # Matrix Server Configuration
 # These reference secrets from vault.yml
-matrix_domain: "chat.example.com"  # Change to your domain
-matrix_homeserver_name: "matrix.example.com"  # Change to your Matrix domain
+matrix_domain: "{{ matrix_domain }}"  # Set in hosts.yml
+matrix_homeserver_name: "{{ matrix_homeserver_name }}"  # Set in hosts.yml
 ssl_email: "{{ vault_ssl_email }}"  # From vault
 
 # Admin user configuration (from vault)

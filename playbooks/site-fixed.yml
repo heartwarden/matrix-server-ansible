@@ -1,0 +1,195 @@
+---
+- name: Deploy secure Matrix server infrastructure
+  hosts: matrix_servers
+  become: yes
+  gather_facts: yes
+
+  pre_tasks:
+    - name: Display deployment info
+      debug:
+        msg: |
+          =====================================
+          MATRIX SERVER DEPLOYMENT STARTING
+          =====================================
+          Target: {{ inventory_hostname }}
+          Matrix domain: {{ matrix_domain | default('NOT SET') }}
+          Homeserver: {{ matrix_homeserver_name | default('NOT SET') }}
+          SSL email: {{ ssl_email | default('NOT SET') }}
+
+    - name: Check if running on existing Matrix server
+      stat:
+        path: /etc/matrix-synapse/homeserver.yaml
+      register: existing_matrix
+
+    - name: Show existing Matrix status
+      debug:
+        msg: "Existing Matrix installation detected - will update/reconfigure"
+      when: existing_matrix.stat.exists
+
+    - name: Validate required variables are set
+      assert:
+        that:
+          - matrix_domain is defined and matrix_domain != ""
+          - matrix_homeserver_name is defined and matrix_homeserver_name != ""
+          - vault_ssl_email is defined and vault_ssl_email != ""
+        fail_msg: |
+          Required variables missing. Check your configuration:
+          - matrix_domain: {{ matrix_domain | default('MISSING') }}
+          - matrix_homeserver_name: {{ matrix_homeserver_name | default('MISSING') }}
+          - vault_ssl_email: {{ vault_ssl_email | default('MISSING') }}
+
+    - name: Test SSH and sudo access
+      command: whoami
+      become: yes
+      changed_when: false
+      register: sudo_test
+
+    - name: Verify we have root access
+      assert:
+        that: sudo_test.stdout == "root"
+        fail_msg: "Need root access for deployment"
+
+    - name: Check if system needs reboot (from previous updates)
+      stat:
+        path: /var/run/reboot-required
+      register: reboot_required
+
+    - name: Warn about required reboot
+      debug:
+        msg: |
+          WARNING: System has pending reboot from previous updates.
+          This deployment will continue but a reboot may be needed afterwards.
+      when: reboot_required.stat.exists
+
+  roles:
+    - role: user_management
+      tags: ['users', 'ssh', 'security']
+
+    - role: debian_hardening
+      tags: ['hardening', 'security']
+
+    - role: firewall
+      tags: ['firewall', 'security']
+
+    - role: ssl_certificates
+      vars:
+        ssl_domains:
+          - "{{ matrix_domain }}"
+          - "{{ matrix_homeserver_name }}"
+      tags: ['ssl', 'certificates']
+
+    - role: monitoring
+      tags: ['monitoring', 'metrics']
+
+    - role: caddy
+      tags: ['webserver', 'proxy']
+
+    - role: matrix_server
+      tags: ['matrix', 'synapse', 'element']
+
+  post_tasks:
+    - name: Wait for services to be ready
+      wait_for:
+        port: "{{ item.port }}"
+        host: "{{ item.host | default('localhost') }}"
+        timeout: 60
+        delay: 5
+      loop:
+        - { port: 5432, service: postgresql }
+        - { port: 6379, service: redis }
+        - { port: 8008, service: matrix-synapse }
+        - { port: 80, service: caddy }
+        - { port: 443, service: caddy }
+      ignore_errors: yes
+      register: service_ports
+
+    - name: Check service status
+      systemd:
+        name: "{{ item }}"
+      register: service_status
+      loop:
+        - matrix-synapse
+        - caddy
+        - postgresql
+        - redis-server
+      ignore_errors: yes
+
+    - name: Test Matrix API locally
+      uri:
+        url: "http://localhost:8008/_matrix/client/versions"
+        method: GET
+        status_code: 200
+      register: matrix_local_test
+      ignore_errors: yes
+
+    - name: Test Matrix federation (if DNS configured)
+      uri:
+        url: "https://{{ matrix_homeserver_name }}/_matrix/federation/v1/version"
+        method: GET
+        status_code: 200
+        validate_certs: yes
+      register: federation_test
+      ignore_errors: yes
+
+    - name: Create post-deployment status report
+      template:
+        src: deployment-report.j2
+        dest: "/root/matrix-deployment-report-{{ ansible_date_time.epoch }}.txt"
+        mode: '0600'
+      vars:
+        deployment_time: "{{ ansible_date_time.iso8601 }}"
+        services: "{{ service_status.results }}"
+        ports: "{{ service_ports.results }}"
+        matrix_test: "{{ matrix_local_test }}"
+        federation: "{{ federation_test }}"
+
+    - name: Display deployment results
+      debug:
+        msg: |
+          =====================================
+          MATRIX SERVER DEPLOYMENT COMPLETE
+          =====================================
+
+          🏠 Homeserver: {{ matrix_homeserver_name }}
+          🌐 Domain: {{ matrix_domain }}
+          📧 SSL Email: {{ vault_ssl_email }}
+          🆔 Admin User: {{ vault_admin_username }}
+
+          🔗 URLs:
+          📱 Element Web: https://{{ matrix_domain }}
+          🔧 Synapse Admin: https://{{ matrix_homeserver_name }}/_synapse/admin/
+          🔗 Federation: https://{{ matrix_homeserver_name }}/_matrix/federation/v1/version
+
+          📊 Service Status:
+          {% for svc in service_status.results %}
+          {{ "✅" if svc.status.ActiveState == "active" else "❌" }} {{ svc.item }}: {{ svc.status.ActiveState | default("unknown") }}
+          {% endfor %}
+
+          🔌 Port Tests:
+          {% for port in service_ports.results %}
+          {{ "✅" if port.state is defined and port.state == "started" else "❌" }} Port {{ port.item.port }}: {{ "Open" if port.state is defined and port.state == "started" else "Closed/Timeout" }}
+          {% endfor %}
+
+          🧪 API Tests:
+          {{ "✅" if matrix_local_test.status is defined and matrix_local_test.status == 200 else "❌" }} Local Matrix API: {{ "Working" if matrix_local_test.status is defined and matrix_local_test.status == 200 else "Failed" }}
+          {{ "✅" if federation_test.status is defined and federation_test.status == 200 else "❌" }} Federation: {{ "Working" if federation_test.status is defined and federation_test.status == 200 else "Check DNS/SSL" }}
+
+          📋 Next Steps:
+          1. Create admin user: sudo /usr/local/bin/create-matrix-admin.sh {{ vault_admin_username }} {{ vault_admin_password }}
+          2. Test Element: https://{{ matrix_domain }}
+          3. Test federation: https://federationtester.matrix.org/
+          4. Configure DNS if not working:
+             {{ matrix_domain }} → {{ ansible_default_ipv4.address }}
+             {{ matrix_homeserver_name }} → {{ ansible_default_ipv4.address }}
+
+          📁 Important Files:
+          - Config: /etc/matrix-synapse/homeserver.yaml
+          - Logs: journalctl -u matrix-synapse -f
+          - Caddy: /etc/caddy/Caddyfile
+          - Status: systemctl status matrix-synapse
+
+          {% if reboot_required.stat.exists %}
+          ⚠️  REBOOT REQUIRED: Run 'reboot' when convenient
+          {% endif %}
+
+          📄 Full report saved: /root/matrix-deployment-report-{{ ansible_date_time.epoch }}.txt

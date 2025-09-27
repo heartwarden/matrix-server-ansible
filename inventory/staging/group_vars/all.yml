@@ -43,8 +43,8 @@ sysctl_hardening_enabled: true
 
 # Matrix Server Configuration (Staging)
 # These reference secrets from vault.yml
-matrix_domain: "staging-chat.example.com"  # Change to your staging domain
-matrix_homeserver_name: "staging-matrix.example.com"  # Change to your staging Matrix domain
+matrix_domain: "{{ matrix_domain }}"  # Set in hosts.yml
+matrix_homeserver_name: "{{ matrix_homeserver_name }}"  # Set in hosts.yml
 ssl_email: "{{ vault_ssl_email }}"  # From vault
 
 # Admin user configuration (from vault)
